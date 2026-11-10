@@ -85,6 +85,32 @@ pub fn is_directive(comment: &str) -> bool {
     DIRECTIVES.iter().any(|d| comment.contains(d))
 }
 
+/// Lowercase words, splitting on non-alphanumerics, camelCase and snake_case.
+pub fn words(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for ch in s.chars() {
+        if (!ch.is_alphanumeric() || (ch.is_uppercase() && prev_lower)) && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+        if ch.is_alphanumeric() {
+            cur.extend(ch.to_lowercase());
+        }
+        prev_lower = ch.is_lowercase() || ch.is_numeric();
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Commented-out code rather than prose: ends like a statement or block, or uses code operators.
+pub fn looks_like_code(comment: &str) -> bool {
+    let body = comment.trim().trim_end_matches("*/").trim_end();
+    body.ends_with([';', '{', '}']) || ["::", "->", "<<", ">>", "&&", "||", "==", "!="].iter().any(|op| body.contains(op))
+}
+
 /// Comment node kinds across all grammars. A new grammar with another spelling adds it here.
 pub fn is_comment(kind: &str) -> bool {
     matches!(kind, "comment" | "line_comment" | "block_comment" | "multiline_comment" | "documentation_comment")

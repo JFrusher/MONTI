@@ -21,7 +21,7 @@ fn audit_and_duplicate_tools_over_stdio() {
     let root = common::temp_dir("mcp");
     fs::write(root.join("util.py"), "def clamp(value, low, high):\n    if value < low:\n        return low\n    if value > high:\n        return high\n    return value\n").unwrap();
 
-    fs::write(root.join("slop.py"), "try:\n    print()\nexcept E:\n    pass\n").unwrap();
+    fs::write(root.join("slop.py"), "try:\n    print()\nexcept Exception:\n    pass\n").unwrap();
 
     let call = |id: u64, name: &str, args: Value| {
         json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})

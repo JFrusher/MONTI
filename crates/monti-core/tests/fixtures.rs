@@ -23,9 +23,11 @@ fn ts() -> Language {
 #[test]
 fn empty_catches_are_errors_commented_ones_warnings() {
     let rules = parse_rules(DEFAULT_RULES).unwrap();
-    let ids = |lang, src: &str| -> Vec<String> { scan(lang, src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
-    let try_except = |body: &str| format!("try:\n    print()\nexcept E:\n{body}\n");
+    let ids = |lang, src: &str| -> Vec<String> { scan(lang, Path::new("snippet"), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
+    let try_except = |body: &str| format!("try:\n    print()\nexcept Exception:\n{body}\n");
     assert_eq!(ids(py(), &try_except("    pass")), ["swallowed-error"]);
+    // A named exception is a decision, not a swallow (benchmark: 3 of 6 false positives).
+    assert_eq!(ids(py(), "try:\n    print()\nexcept KeyError:\n    pass\n"), Vec::<String>::new());
     assert_eq!(ids(py(), &try_except("    # deliberate\n    pass")), ["commented-error"]);
     assert_eq!(ids(py(), &try_except("    pass  # deliberate")), ["commented-error"]);
     assert_eq!(ids(ts(), "try { go(); } catch { }"), ["swallowed-error"]);
@@ -45,7 +47,8 @@ fn every_language_matches_its_fixtures() {
         let ext = lang.spec().extensions[0];
         let read = |f: String| fs::read_to_string(dir.join(&f)).unwrap_or_else(|_| panic!("missing fixtures/{}/{f}", lang.name()));
         let found = |src: &str| -> Vec<String> {
-            match scan(lang, src, &rules) {
+            // The bare file name: the real path is under tests/, which would make it a test file.
+            match scan(lang, Path::new(&format!("fixture.{ext}")), src, &rules) {
                 Ok(fs) => fs.iter().map(|f| format!("{} {}", f.line, f.rule_id)).collect(),
                 Err(e) => vec![format!("ERROR {e:#}")],
             }
@@ -67,7 +70,7 @@ fn every_language_matches_its_fixtures() {
 fn fixes_unwrap_null_checks_and_delete_restating_comments() {
     let src = include_str!("fixtures/python/slop.py");
     let rules = parse_rules(DEFAULT_RULES).unwrap();
-    let findings = scan(py(), src, &rules).unwrap();
+    let findings = scan(py(), Path::new("snippet.py"), src, &rules).unwrap();
     let edits: Vec<_> = findings.iter().filter_map(|f| f.fix.as_ref()).collect();
     assert_eq!(edits.len(), 2);
     let fixed = apply_fixes(src, &edits);
@@ -76,7 +79,7 @@ fn fixes_unwrap_null_checks_and_delete_restating_comments() {
     ast::parse(py(), &fixed).unwrap();
 
     let src = include_str!("fixtures/go/slop.go");
-    let findings = scan(go(), src, &rules).unwrap();
+    let findings = scan(go(), Path::new("snippet.go"), src, &rules).unwrap();
     let edits: Vec<_> = findings.iter().filter_map(|f| f.fix.as_ref()).collect();
     let fixed = apply_fixes(src, &edits);
     assert!(fixed.contains("\ts := &Store{}\n\ts.init()\n\treturn s\n"), "{fixed}");
@@ -93,7 +96,7 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     .unwrap();
     fs::write(
         dir.join("b.ts"),
-        "export function weightOf(parcels: Parcel[]): number {\n  let acc = 0;\n  for (const p of parcels) {\n    if (p.mass > 0) {\n      acc += p.mass * p.count;\n    }\n  }\n  return acc;\n}\n\nexport function names(xs: { name: string }[]): string {\n  return xs.map((x) => x.name.trim()).join(', ');\n}\n",
+        "export function totalPrices(items: Item[]): number {\n  let total = 0;\n  for (const item of items) {\n    if (item.price > 0) {\n      total += item.price * item.qty;\n    }\n  }\n  return total;\n}\n\n// Same shape, different names: small functions like this are not copies.\nexport function weightOf(parcels: Parcel[]): number {\n  let acc = 0;\n  for (const p of parcels) {\n    if (p.mass > 0) {\n      acc += p.mass * p.count;\n    }\n  }\n  return acc;\n}\n\nexport function names(xs: { name: string }[]): string {\n  return xs.map((x) => x.name.trim()).join(', ');\n}\n",
     )
     .unwrap();
     fs::write(
@@ -141,7 +144,7 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     .map(|(a, b, c)| (a.to_string(), b.to_string(), *c))
     .collect();
     assert_eq!(got, want);
-    assert!(reports[0].findings[0].message.contains("100% match with `weightOf`"));
+    assert!(reports[0].findings[0].message.contains("100% match with `totalPrices`"), "{}", reports[0].findings[0].message);
 }
 
 #[test]
@@ -162,8 +165,8 @@ fn syntax_errors_fail() {
 #[test]
 fn monti_ignore_comments_silence_findings() {
     let rules = parse_rules(DEFAULT_RULES).unwrap();
-    let ids = |src: &str| -> Vec<String> { scan(py(), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
-    let swallow = |marker: &str| format!("try:\n    print()\nexcept E:  {marker}\n    pass\n");
+    let ids = |src: &str| -> Vec<String> { scan(py(), Path::new("snippet.py"), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
+    let swallow = |marker: &str| format!("try:\n    print()\nexcept Exception:  {marker}\n    pass\n");
     assert_eq!(ids(&swallow("")), ["swallowed-error"]);
     assert_eq!(ids(&swallow("# monti-ignore")), Vec::<String>::new());
     assert_eq!(ids(&swallow("# monti-ignore: swallowed-error")), Vec::<String>::new());

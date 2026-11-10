@@ -1,4 +1,4 @@
-use crate::ast::{Language, descendants, is_comment, is_directive, last_row};
+use crate::ast::{Language, descendants, is_comment, is_directive, last_row, looks_like_code, words};
 use std::collections::BTreeSet;
 use tree_sitter::Node;
 
@@ -45,9 +45,33 @@ pub fn measure(node: Node, src: &str) -> Metrics {
     }
 }
 
+/// Lines of short own-line comments (at most 6 words: narration like `# Create figure`) per code
+/// line. Full-sentence comments explain why and do not count, nor does commented-out code.
+/// Consecutive comment lines are one comment: Python stores a two-line sentence as two nodes.
 pub fn comment_code_ratio(node: Node, src: &str) -> f64 {
     let m = measure(node, src);
-    m.comment_lines as f64 / m.code_lines as f64
+    let comments: Vec<Node> = descendants(node).into_iter().filter(|n| is_comment(n.kind())).collect();
+    let mut blocks: Vec<Vec<Node>> = Vec::new();
+    for c in comments {
+        match blocks.last_mut() {
+            Some(block) if last_row(*block.last().unwrap()) + 1 == c.start_position().row => block.push(c),
+            _ => blocks.push(vec![c]),
+        }
+    }
+    let narration: BTreeSet<usize> = blocks
+        .iter()
+        .filter(|block| {
+            let text: String = block.iter().map(|c| &src[c.byte_range()]).collect::<Vec<_>>().join("\n");
+            !is_directive(&text) && !looks_like_code(&text) && words(&text).len() <= 6
+        })
+        .flat_map(|block| block[0].start_position().row..=last_row(*block.last().unwrap()))
+        .collect();
+    let code: BTreeSet<usize> = descendants(node)
+        .into_iter()
+        .filter(|n| n.child_count() == 0 && !is_comment(n.kind()))
+        .flat_map(|n| n.start_position().row..=n.end_position().row)
+        .collect();
+    narration.difference(&code).count() as f64 / m.code_lines as f64
 }
 
 /// Every function node under `root`, nested ones included.

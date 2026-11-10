@@ -133,7 +133,7 @@ fn audit_file(root: &Path, args: Value) -> Result<Value> {
         Some(c) => c,
         None => fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?,
     };
-    let findings = monti_core::scan(lang, &src, &rules::load(root)?)?;
+    let findings = monti_core::scan(lang, &path, &src, &rules::load(root)?)?;
     Ok(json!({ "path": args.path, "findings": findings }))
 }
 

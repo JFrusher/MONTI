@@ -2,10 +2,10 @@
 
 use crate::index::{NAME_KINDS, fn_name};
 use crate::{Edit, Fix, FixLevel};
-use crate::ast::{Language, descendants, is_comment, is_directive, last_row};
+use crate::ast::{Language, descendants, is_comment, is_directive, last_row, looks_like_code, words};
 use crate::languages::NullCheck;
 use crate::metrics::functions;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 
 pub struct Hit<'t> {
@@ -32,7 +32,7 @@ fn named(n: Node) -> Vec<Node> {
 pub fn pass_through_wrappers<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
     functions(lang, root)
         .into_iter()
-        .filter(|f| !is_method(lang, *f) && !is_callback(*f) && is_pass_through(lang, *f, src))
+        .filter(|f| !is_method(lang, *f) && !is_callback(*f) && !is_decorated(*f) && is_pass_through(lang, *f, src))
         .map(|node| Hit { node, fix: inline_wrapper(lang, root, node, src), note: None })
         .collect()
 }
@@ -86,7 +86,16 @@ pub(crate) fn delete_function(f: Node, src: &str, mut others: Vec<Edit>, name: S
 /// Methods may delegate to satisfy an interface or act as a facade.
 fn is_method(lang: Language, f: Node) -> bool {
     let spec = lang.spec();
-    if spec.methods.contains(&f.kind()) {
+    // C++ `double& Cycle_Model::rate(...) { ... }`: a method defined outside its class. Follow only
+    // the name chain (reference -> function -> name): parameter types like `std::string` are
+    // qualified too.
+    let mut qualified = false;
+    let mut d = f.child_by_field_name("declarator");
+    while let Some(n) = d {
+        qualified |= n.kind() == "qualified_identifier";
+        d = n.child_by_field_name("declarator");
+    }
+    if spec.methods.contains(&f.kind()) || qualified {
         return true;
     }
     let mut parent = f.parent();
@@ -98,19 +107,31 @@ fn is_method(lang: Language, f: Node) -> bool {
 }
 
 /// A callback also pins the arity: `Array.from(xs, b => f(b))` is not `Array.from(xs, f)`,
-/// because `Array.from` passes the index too.
+/// because `Array.from` passes the index too. An object/dict property value implements an
+/// interface or a config slot (`beforeSend: (e) => scrub(e)`), which pins its signature the same way.
 fn is_callback(f: Node) -> bool {
-    f.parent().is_some_and(|p| matches!(p.kind(), "arguments" | "argument_list" | "argument"))
+    f.parent().is_some_and(|p| matches!(p.kind(), "arguments" | "argument_list" | "argument" | "pair"))
+}
+
+/// Decorators register functions (routes, tests, fixtures) under a signature they impose.
+fn is_decorated(f: Node) -> bool {
+    f.parent().is_some_and(|p| p.kind() == "decorated_definition")
 }
 
 fn is_pass_through(lang: Language, func: Node, src: &str) -> bool {
     let Some(params) = param_names(func, src) else { return false };
-    // A zero-argument forwarder is usually an entry point or thunk, not a wrapper.
-    if params.is_empty() {
+    // A zero-argument forwarder is usually an entry point or thunk, not a wrapper; one that adds
+    // defaults (`trace(path, seed=7)`) changes how the target is called.
+    if params.is_empty() || has_defaults(func) {
         return false;
     }
     let Some(call) = func.child_by_field_name("body").and_then(|b| single_call(lang, b)) else { return false };
     let Some(args) = call.child_by_field_name("arguments") else { return false };
+    // `(d) => fmt.format(d)` keeps `this` bound in JavaScript; `fmt.format` alone would not.
+    let member_target = call.child_by_field_name("function").is_some_and(|t| t.child_by_field_name("object").is_some());
+    if lang.spec().receiver_lost && member_target {
+        return false;
+    }
     named(args).into_iter().map(|a| text(a, src)).eq(params)
 }
 
@@ -147,6 +168,14 @@ pub(crate) fn parameter_list(func: Node) -> Option<Node> {
         n = *named(n).first()?;
     }
     None
+}
+
+fn has_defaults(func: Node) -> bool {
+    parameter_list(func).is_some_and(|list| {
+        named(list).iter().any(|p| {
+            p.kind().contains("default") || p.kind().contains("optional") || p.child_by_field_name("value").is_some()
+        })
+    })
 }
 
 /// Parameter names in order, receivers (`self`, `cls`, Rust `&self`) dropped. `None` for shapes we do not model.
@@ -267,6 +296,18 @@ fn unwrap_if(if_node: Node, src: &str) -> Option<Edit> {
     Some(Edit { start: if_node.start_byte(), end: if_node.end_byte(), replacement })
 }
 
+// ---- comment reasons --------------------------------------------------------
+
+/// True when the comments inside `node` explain something: more than a shrug like
+/// `# ignore`, `// silent fail` or `% swallow errors`.
+pub fn comments_explain(node: Node, src: &str) -> bool {
+    const SHRUGS: &[&str] = &["silent", "swallow", "ignor", "nothing", "noop", "pass", "suppress"];
+    let words: Vec<String> =
+        descendants(node).into_iter().filter(|n| is_comment(n.kind())).flat_map(|n| words(text(n, src))).collect();
+    let shrug = words.iter().any(|w| SHRUGS.iter().any(|s| w.starts_with(s)));
+    !(words.len() <= 2 || (words.len() <= 5 && shrug))
+}
+
 // ---- undefined names ------------------------------------------------------
 
 /// Bare calls to a name that appears nowhere else in the file and is not a builtin: in a dynamic
@@ -301,9 +342,23 @@ pub fn undefined_names<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit
 /// functions are skipped (their signature is usually imposed), as are stubs, `_`-prefixed names and
 /// splats.
 pub fn unused_parameters<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
+    // A parameter list repeated by other functions in the file marks a family dispatched through
+    // one table (`_check_*(match, segs, expect)`): its signature is imposed, so a member ignoring
+    // one parameter is not slop.
+    let signature = |f: Node| parameter_list(f).map(|l| text(l, src).split_whitespace().collect::<String>());
+    let all = functions(lang, root);
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for f in &all {
+        if let Some(sig) = signature(*f) {
+            *seen.entry(sig).or_default() += 1;
+        }
+    }
     let mut hits = Vec::new();
-    for f in functions(lang, root) {
-        if is_method(lang, f) || is_callback(f) || f.parent().is_some_and(|p| p.kind() == "decorated_definition") {
+    for f in all {
+        // Three or more: two functions sharing a list is common coincidence (benchmark: both lost
+        // real findings were pairs); dispatch-table families are larger.
+        let shared = signature(f).is_some_and(|sig| seen[&sig] >= 3);
+        if is_method(lang, f) || is_callback(f) || is_decorated(f) || shared {
             continue;
         }
         // Test runners inject parameters by name (pytest fixtures, Go's `t`): a fixture requested
@@ -347,8 +402,20 @@ fn is_stub(body: Node) -> bool {
 
 // ---- restating comments ----------------------------------------------------
 
-/// Notes and doc comments are never "restating", whatever their words.
-const KEEP_MARKERS: &[&str] = &["TODO", "FIXME", "HACK", "SAFETY", "NOTE", "///", "//!", "/**"];
+/// Notes and doc comments (incl. Sphinx `#:`) are never "restating", whatever their words.
+const KEEP_MARKERS: &[&str] = &["TODO", "FIXME", "HACK", "SAFETY", "NOTE", "///", "//!", "/**", "#:"];
+
+/// Words a restating comment may add to the code's own names ("set the age to 20").
+const FILLER: &[&str] = &[
+    "a", "an", "the", "to", "of", "for", "and", "or", "in", "on", "at", "by", "with", "from", "into", "is", "are",
+    "be", "it", "this", "that", "we", "our", "set", "sets", "get", "gets", "create", "creates", "make", "makes",
+    "call", "calls", "update", "updates", "increment", "increments", "decrement", "initialize", "initialise", "init",
+    "add", "adds", "append", "remove", "delete", "return", "returns", "new", "check", "checks", "value", "variable",
+    "then", "now", "here", "next", "first", "finally", "do", "run", "start", "stop", "save", "load", "read", "write",
+    "print", "show", "plot", "draw", "compute", "calculate", "define", "declare", "assign", "store", "prepare",
+    "handle", "process", "open", "close", "use", "loop", "over", "each", "all", "current",
+];
+
 
 /// An own-line comment block whose words cover every identifier of the statement right below it,
 /// e.g. `// Set age to 20` above `this.age = 20`. Fix: delete the comment lines.
@@ -378,7 +445,8 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
             first = p;
         }
         let comment = &src[first.start_byte()..last.end_byte()];
-        if is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || !restates(comment, target, src) {
+        let skip = is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || looks_like_code(comment);
+        if skip || !restates(comment, target, src) {
             continue;
         }
         let fix = Fix::new(FixLevel::Safe, vec![delete_lines(first, last, src)]);
@@ -400,28 +468,12 @@ fn restates(comment: &str, target: Node, src: &str) -> bool {
         .collect();
     ids.remove("self");
     ids.remove("this");
-    // The +4 allows filler like "set the ... to"; longer comments are explaining something.
-    !ids.is_empty() && ids.is_subset(&comment_words) && comment_words.len() <= ids.len() + 4
-}
-
-/// Lowercase words, splitting on non-alphanumerics, camelCase and snake_case.
-fn words(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut prev_lower = false;
-    for ch in s.chars() {
-        if (!ch.is_alphanumeric() || (ch.is_uppercase() && prev_lower)) && !cur.is_empty() {
-            out.push(std::mem::take(&mut cur));
-        }
-        if ch.is_alphanumeric() {
-            cur.extend(ch.to_lowercase());
-        }
-        prev_lower = ch.is_lowercase() || ch.is_numeric();
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
+    // Beyond the code's own names, only filler and numbers ("set the age to 20"); any other word
+    // carries information ("SUBPLOT 2: AUC percentile ranges").
+    let extra_is_filler = comment_words
+        .difference(&ids)
+        .all(|w| FILLER.contains(&w.as_str()) || w.chars().all(|c| c.is_ascii_digit()));
+    !ids.is_empty() && ids.is_subset(&comment_words) && extra_is_filler
 }
 
 /// Whole lines from `first`'s line through `last`'s line, newline included.
@@ -439,6 +491,6 @@ fn delete_lines(first: Node, last: Node, src: &str) -> Edit {
 mod tests {
     #[test]
     fn words_split_case_and_punctuation() {
-        assert_eq!(super::words("// setUserAge to_20"), ["set", "user", "age", "to", "20"]);
+        assert_eq!(crate::ast::words("// setUserAge to_20"), ["set", "user", "age", "to", "20"]);
     }
 }

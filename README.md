@@ -85,6 +85,12 @@ java = '''(catch_clause body: (block) @block (#match? @block "^\\{\\s*\\}$"))'''
 
 `monti tree <file>` prints a file's syntax tree, to write queries against.
 
+Any rule also takes `skip_tests = true` (not applied to `tests/`, `*.test.*`, `test_*`, … files)
+and `unless_comment_explains = true` (dropped when a comment in the flagged code gives a reason
+rather than "ignore").
+
+Rule precision is measured on 36 real repos with hand labels: see [bench/README.md](bench/README.md).
+
 ## MCP
 
 Add to Claude Code: `claude mcp add monti -- monti mcp`.

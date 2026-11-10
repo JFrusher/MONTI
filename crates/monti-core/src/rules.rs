@@ -66,6 +66,10 @@ pub struct Rule {
     pub message: String,
     pub languages: Vec<Language>,
     pub check: Check,
+    /// Not applied to test files (see [`crate::is_test_path`]).
+    pub skip_tests: bool,
+    /// Findings whose node holds a comment that explains a reason are dropped.
+    pub unless_comment_explains: bool,
 }
 
 #[derive(Deserialize)]
@@ -86,6 +90,10 @@ struct RawRule {
     max_comment_code_ratio: Option<f64>,
     check: Option<Builtin>,
     min_similarity: Option<f64>,
+    #[serde(default)]
+    skip_tests: bool,
+    #[serde(default)]
+    unless_comment_explains: bool,
 }
 
 /// `<dir>/monti.toml` if present (it replaces the defaults), else the embedded defaults.
@@ -159,6 +167,8 @@ fn compile(id: String, raw: RawRule) -> Result<Rule> {
         message: raw.message,
         languages,
         check,
+        skip_tests: raw.skip_tests,
+        unless_comment_explains: raw.unless_comment_explains,
     })
 }
 

@@ -1,0 +1,176 @@
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/matlab_analyze_outputs.m", "line": 319, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around closing a figure"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/analyze_MC10k_comprehensive.m", "line": 654, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "noise", "why": "catch falls through to the next fallback"}
+{"repo": "PBPK-ABM-thesis", "path": "scripts/python/export_outputs_to_excel.py", "line": 378, "rule": "swallowed-error", "fingerprint": "4cfd38a03691d985", "label": "real", "why": "except Exception pass while probing hides bugs"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber_yolo.py", "line": 94, "rule": "swallowed-error", "fingerprint": "4cfd38a03691d985", "label": "noise", "why": "best-effort temp file cleanup in finally"}
+{"repo": "theos-engine", "path": "fuzz/decode_fuzzer.cpp", "line": 8, "rule": "swallowed-error", "fingerprint": "e2071f3e7cd50038", "label": "noise", "why": "fuzz harness expects this specific FormatError"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/analyze_MC10k_comprehensive.m", "line": 767, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around legend styling"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/matlab_analyze_outputs.m", "line": 311, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "failed .fig save silently ignored"}
+{"repo": "Medtech", "path": "+viz/plotStakeholderSimpleAlgorithm.m", "line": 157, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "noise", "why": "try the next candidate file"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/matlab_compare_outputs.m", "line": 566, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around figure sizing"}
+{"repo": "PortDB", "path": "backend/portdb/api.py", "line": 329, "rule": "swallowed-error", "fingerprint": "a69b66b9df08a7d5", "label": "noise", "why": "specific WebSocketDisconnect is the normal end"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/matlab_compare_outputs.m", "line": 528, "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch restoring a default"}
+{"repo": "WarRoom", "path": "services/target_app/src/app.py", "line": 245, "rule": "swallowed-error", "fingerprint": "602bf662cbd48edb", "label": "noise", "why": "specific FlagUnavailableError deliberately optional"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/analyze_MC10k_comprehensive.m", "line": 692, "rule": "commented-error", "fingerprint": "3ada6183419f8ba3", "label": "noise", "why": "comment gives a reason (MATLAB version compatibility)"}
+{"repo": "Knotwork", "path": "suite/components/binder/Binder.tsx", "line": 327, "rule": "commented-error", "fingerprint": "f18b7a936dfa8c0f", "label": "noise", "why": "comment gives a reason (private browsing)"}
+{"repo": "Toke", "path": "src/engine/db/rules.ts", "line": 129, "rule": "commented-error", "fingerprint": "f18b7a936dfa8c0f", "label": "noise", "why": "comment gives a reason"}
+{"repo": "Knotwork", "path": "suite/apps/stationery/render/pdf/renderPdf.ts", "line": 375, "rule": "commented-error", "fingerprint": "f18b7a936dfa8c0f", "label": "noise", "why": "comment gives a reason (corrupt image)"}
+{"repo": "Tableaux", "path": "client/src/hooks/useAutoSave.js", "line": 109, "rule": "commented-error", "fingerprint": "f18b7a936dfa8c0f", "label": "noise", "why": "comment gives a reason (surfaced later)"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/MC_5FU_publication_helpers.m", "line": 486, "rule": "commented-error", "fingerprint": "8abf77980025dc95", "label": "real", "why": "'Silent fail' is a shrug, not a reason"}
+{"repo": "Plaque", "path": "src/state/persist.ts", "line": 291, "rule": "commented-error", "fingerprint": "f18b7a936dfa8c0f", "label": "noise", "why": "comment gives a reason (blocked storage)"}
+{"repo": "SilentSolution", "path": "src/settings.py", "line": 61, "rule": "commented-error", "fingerprint": "0c75ff4a1b6460b1", "label": "noise", "why": "comment gives a reason (read-only home)"}
+{"repo": "dtn-medical-mesh", "path": "interface/static/i18n.js", "line": 14, "rule": "commented-error", "fingerprint": "1ffaecceae9733ad", "label": "noise", "why": "comment gives a reason (private window)"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/save_publication_figure.m", "line": 30, "rule": "commented-error", "fingerprint": "45bba2cb1cdcba33", "label": "real", "why": "'Silent fallback failure' is a shrug"}
+{"repo": "Plaque", "path": "src/state/persist.ts", "line": 190, "rule": "commented-error", "fingerprint": "f18b7a936dfa8c0f", "label": "noise", "why": "comment gives a reason (no undo)"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/pbpk/Logger.m", "line": 88, "rule": "commented-error", "fingerprint": "c5f37f8562775cfa", "label": "real", "why": "'swallow ... errors' restates the swallow"}
+{"repo": "PBPK-ABM-thesis", "path": "addons/PhysiBoSS/setup_libmaboss.py", "line": 46, "rule": "broad-except", "fingerprint": "277d3466a0a5b919", "label": "real", "why": "bare except also catches KeyboardInterrupt/SystemExit"}
+{"repo": "PBPK-ABM-thesis", "path": "scripts/python/export_outputs_to_excel.py", "line": 610, "rule": "broad-except", "fingerprint": "00ab7fc035d3c486", "label": "real", "why": "Exception hides bugs; AttributeError was meant"}
+{"repo": "EMG", "path": "src/emgdemo/engine.py", "line": 182, "rule": "broad-except", "fingerprint": "abad149eb12eff2e", "label": "noise", "why": "binds and logs the error, documented"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber_review.py", "line": 1453, "rule": "broad-except", "fingerprint": "f5dfb62595712348", "label": "noise", "why": "binds and logs the error"}
+{"repo": "PortDB", "path": "backend/portdb/sim_engine.py", "line": 552, "rule": "broad-except", "fingerprint": "a9d4c26ee785e097", "label": "noise", "why": "binds and reports the error"}
+{"repo": "PortDB", "path": "backend/portdb/api.py", "line": 105, "rule": "broad-except", "fingerprint": "e8d201d4fba4fc42", "label": "noise", "why": "log.exception in a reconnect loop"}
+{"repo": "PBPK-ABM-thesis", "path": "scripts/python/export_outputs_to_excel.py", "line": 392, "rule": "broad-except", "fingerprint": "66acb14005c28e66", "label": "real", "why": "Exception hides bugs while probing"}
+{"repo": "MALLI", "path": "ml/src/utils/diagnose_full_dataset.py", "line": 654, "rule": "broad-except", "fingerprint": "f5dfb62595712348", "label": "noise", "why": "binds and logs the error"}
+{"repo": "PortDB", "path": "backend/portdb/api.py", "line": 78, "rule": "broad-except", "fingerprint": "e8d201d4fba4fc42", "label": "noise", "why": "log.exception with context"}
+{"repo": "MALLI", "path": "tests/test_cell_counter.py", "line": 135, "rule": "broad-except", "fingerprint": "59be81713dd9ebcb", "label": "noise", "why": "binds and logs the error at top level"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber.py", "line": 981, "rule": "broad-except", "fingerprint": "f5dfb62595712348", "label": "noise", "why": "binds and logs the error"}
+{"repo": "PortDB", "path": "backend/portdb/sim_engine.py", "line": 299, "rule": "broad-except", "fingerprint": "59be81713dd9ebcb", "label": "noise", "why": "binds and reports the error"}
+{"repo": "dtn-medical-mesh", "path": "simulation/live.py", "line": 319, "rule": "pass-through-wrapper", "fingerprint": "d2cce5c4bb476e84", "label": "real", "why": "private alias of fhir.decode"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_signal_behavior.cpp", "line": 758, "rule": "pass-through-wrapper", "fingerprint": "95e516eec90c3521", "label": "real", "why": "alias of find_parameter_index"}
+{"repo": "Knotwork", "path": "suite/lib/store/useKnotworkStore.cloudSync.test.ts", "line": 14, "rule": "pass-through-wrapper", "fingerprint": "7854f4394defbe56", "label": "noise", "why": "vi.mock factory needs the lazy wrapper"}
+{"repo": "Plaque", "path": "src/state/store.ts", "line": 641, "rule": "pass-through-wrapper", "fingerprint": "afab7de9e48b6a46", "label": "noise", "why": "store method in an object literal"}
+{"repo": "Knotwork", "path": "suite/lib/documents/assets.test.ts", "line": 27, "rule": "pass-through-wrapper", "fingerprint": "1c6d2ab3c4eb97a3", "label": "noise", "why": "vi.mock factory needs the lazy wrapper"}
+{"repo": "Plaque", "path": "src/render/pdf/duplexTestPdf.ts", "line": 92, "rule": "pass-through-wrapper", "fingerprint": "99a27b29df94f7da", "label": "real", "why": "local alias of mmToPt"}
+{"repo": "VibeSim", "path": "vibesim/transport/rest.py", "line": 201, "rule": "pass-through-wrapper", "fingerprint": "0669f986247e05cf", "label": "noise", "why": "decorated route handler"}
+{"repo": "EMG", "path": "tests/test_repo_integrity.py", "line": 104, "rule": "pass-through-wrapper", "fingerprint": "4ff9587cad8a46e2", "label": "noise", "why": "decorated pytest test"}
+{"repo": "Knotwork", "path": "suite/apps/timeline/state/blobStore.ts", "line": 18, "rule": "pass-through-wrapper", "fingerprint": "741bf9b38e7c8c84", "label": "noise", "why": "object literal implements an interface"}
+{"repo": "OctoTrace", "path": "lib/format.ts", "line": 21, "rule": "pass-through-wrapper", "fingerprint": "7349d3a55410a39b", "label": "noise", "why": "member call keeps this-binding in JS"}
+{"repo": "Knotwork", "path": "suite/components/binder/Binder.tsx", "line": 25, "rule": "pass-through-wrapper", "fingerprint": "1bd6d355be470727", "label": "real", "why": "local alias of formatClock"}
+{"repo": "Knotwork", "path": "suite/instrumentation-client.ts", "line": 39, "rule": "pass-through-wrapper", "fingerprint": "d074960a3055999d", "label": "noise", "why": "config callback in an object literal"}
+{"repo": "Knotwork", "path": "suite/apps/stationery/invariants.test.ts", "line": 93, "rule": "comment-flood", "fingerprint": "7fac4eb2276b5d11", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Knotwork", "path": "suite/lib/testing/database.ts", "line": 70, "rule": "comment-flood", "fingerprint": "ca54ea0e23ae799f", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Toke", "path": "src/engine/scene/image.test.ts", "line": 206, "rule": "comment-flood", "fingerprint": "8e635c3ac1175fdb", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Knotwork", "path": "suite/app/auth/callback/route.ts", "line": 56, "rule": "comment-flood", "fingerprint": "239381be109be187", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Toke", "path": "e2e/rulers.spec.ts", "line": 33, "rule": "comment-flood", "fingerprint": "9249832ed6c7a8e9", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Toke", "path": "src/engine/theme/contrast.test.ts", "line": 165, "rule": "comment-flood", "fingerprint": "254585082e8226f5", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Knotwork", "path": "suite/lib/store/StoreHydrator.test.tsx", "line": 24, "rule": "comment-flood", "fingerprint": "673f1c58aebc2986", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Plaque", "path": "src/core/data/artefacts.test.ts", "line": 37, "rule": "comment-flood", "fingerprint": "ce8a52dba8213119", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Toke", "path": "src/engine/pdf/document.golden.test.ts", "line": 125, "rule": "comment-flood", "fingerprint": "f79af88dd499f29b", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Toke", "path": "src/engine/tokens/resolver.test.ts", "line": 114, "rule": "comment-flood", "fingerprint": "cb4c027b8b1c70ab", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Tableaux", "path": "server/routes/upload.js", "line": 11, "rule": "comment-flood", "fingerprint": "78273af440344ea1", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "Knotwork", "path": "suite/apps/stationery/render/pdf/renderPdf.test.ts", "line": 137, "rule": "comment-flood", "fingerprint": "0f3232f7e9f3e58d", "label": "noise", "why": "full-sentence why-comments, not narration"}
+{"repo": "PBPK-ABM-thesis", "path": "modules/PhysiCell_pathology.cpp", "line": 1698, "rule": "restating-comment", "fingerprint": "fa7caa528727e720", "label": "noise", "why": "commented-out code, not a restatement"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_cell.cpp", "line": 1006, "rule": "restating-comment", "fingerprint": "847f20a06058d924", "label": "noise", "why": "commented-out code"}
+{"repo": "poly-compress", "path": "src/polycompress/format.py", "line": 31, "rule": "restating-comment", "fingerprint": "d3f129766e48f865", "label": "noise", "why": "Sphinx #: attribute doc comment"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/MC_5FU_PK_sensitivity.m", "line": 2521, "rule": "restating-comment", "fingerprint": "3d96abc52e5b3ea7", "label": "noise", "why": "section title carrying extra information"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/MC_5FU_PK_sensitivity.m", "line": 1425, "rule": "restating-comment", "fingerprint": "37e5c845dfba4883", "label": "noise", "why": "section title carrying extra information"}
+{"repo": "PBPK-ABM-thesis", "path": "addons/libRoadrunner/src/librr_intracellular.h", "line": 50, "rule": "restating-comment", "fingerprint": "16de46fabea93be2", "label": "noise", "why": "commented-out code"}
+{"repo": "PBPK-ABM-thesis", "path": "modules/PhysiCell_MultiCellDS.cpp", "line": 733, "rule": "restating-comment", "fingerprint": "06db1027a001d56a", "label": "real", "why": "'next, filename' narrates the declaration"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_constants.cpp", "line": 135, "rule": "restating-comment", "fingerprint": "7668c6ae135b54d7", "label": "noise", "why": "commented-out code"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/MC_5FU_PK_sensitivity.m", "line": 2396, "rule": "restating-comment", "fingerprint": "a634b7c1a58b1f91", "label": "real", "why": "'Create figure' above figure(...)"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/MC_5FU_PK_sensitivity.m", "line": 2245, "rule": "restating-comment", "fingerprint": "f75b06e589581baf", "label": "real", "why": "'Create figure' above figure(...)"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_cell.cpp", "line": 641, "rule": "restating-comment", "fingerprint": "648ed0685bf847d7", "label": "noise", "why": "commented-out code"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_cell_container.cpp", "line": 267, "rule": "restating-comment", "fingerprint": "55eb17c5d19c66fd", "label": "noise", "why": "commented-out code"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "line": 400, "rule": "type-escape", "fingerprint": "041d6362c6a93f59", "label": "real", "why": "any on event frames in production code"}
+{"repo": "Knotwork", "path": "suite/apps/stationery/state/history.test.ts", "line": 16, "rule": "type-escape", "fingerprint": "1fff9bcf81c427c8", "label": "noise", "why": "raw fixture JSON in a test"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "line": 462, "rule": "type-escape", "fingerprint": "5a20b99ecd9f25a6", "label": "real", "why": "any on event frames in production code"}
+{"repo": "Knotwork", "path": "suite/lib/suppliers/callSheet.test.ts", "line": 11, "rule": "type-escape", "fingerprint": "1fff9bcf81c427c8", "label": "noise", "why": "raw fixture JSON in a test"}
+{"repo": "Knotwork", "path": "suite/lib/boxes/drinks.test.ts", "line": 11, "rule": "type-escape", "fingerprint": "1fff9bcf81c427c8", "label": "noise", "why": "raw fixture JSON in a test"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "line": 446, "rule": "type-escape", "fingerprint": "0b33799cf7223eec", "label": "real", "why": "any on event frames in production code"}
+{"repo": "Knotwork", "path": "suite/e2e/stationery.spec.ts", "line": 316, "rule": "type-escape", "fingerprint": "86a966a3d7c932a4", "label": "noise", "why": "raw stored document in an e2e test"}
+{"repo": "Knotwork", "path": "suite/e2e/wedding.ts", "line": 80, "rule": "type-escape", "fingerprint": "531e13f6aaf8080c", "label": "noise", "why": "raw stored document in an e2e test"}
+{"repo": "Knotwork", "path": "suite/e2e/stationery.spec.ts", "line": 275, "rule": "type-escape", "fingerprint": "21d858c21c5e537d", "label": "noise", "why": "raw stored document in an e2e test"}
+{"repo": "Knotwork", "path": "suite/apps/stationery/state/live.test.ts", "line": 15, "rule": "type-escape", "fingerprint": "1fff9bcf81c427c8", "label": "noise", "why": "raw fixture JSON in a test"}
+{"repo": "Knotwork", "path": "suite/lib/suppliers/links.test.ts", "line": 38, "rule": "type-escape", "fingerprint": "1fff9bcf81c427c8", "label": "noise", "why": "raw fixture JSON in a test"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "line": 544, "rule": "type-escape", "fingerprint": "ab0bf5af1e55d765", "label": "real", "why": "any queue in production code"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber_yolo.py", "line": 33, "rule": "unused-parameter", "fingerprint": "a17717f19c827739", "label": "real", "why": "roi_size accepted and ignored"}
+{"repo": "phase-trace", "path": "tracer/fixtures.py", "line": 300, "rule": "unused-parameter", "fingerprint": "1358573a02afe98a", "label": "noise", "why": "shared signature of a check table"}
+{"repo": "phase-trace", "path": "tracer/fixtures.py", "line": 331, "rule": "unused-parameter", "fingerprint": "705e588c7cee1ef9", "label": "noise", "why": "shared signature of a check table"}
+{"repo": "SilentSolution", "path": "src/stations.py", "line": 242, "rule": "unused-parameter", "fingerprint": "0f172954cb3bf851", "label": "noise", "why": "shared signature of draw callbacks"}
+{"repo": "img-bezier-fit", "path": "media/assets.py", "line": 147, "rule": "unused-parameter", "fingerprint": "cee29ee769f39cdb", "label": "real", "why": "oklab accepted and ignored"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_mesh.cpp", "line": 234, "rule": "unused-parameter", "fingerprint": "8ce6f805a1b0dac6", "label": "real", "why": "SA ignored in an unfinished function"}
+{"repo": "PBPK-ABM-thesis", "path": "modules/PhysiCell_geometry.cpp", "line": 252, "rule": "unused-parameter", "fingerprint": "14c4e5888be25905", "label": "real", "why": "compression accepted and silently ignored"}
+{"repo": "phase-trace", "path": "tracer/fixtures.py", "line": 338, "rule": "unused-parameter", "fingerprint": "4db111e5b6a137f0", "label": "noise", "why": "shared signature of a check table"}
+{"repo": "SSAP", "path": "backend/solver/ismcts.py", "line": 28, "rule": "unused-parameter", "fingerprint": "de3fa089718388cc", "label": "noise", "why": "shared Evaluator signature"}
+{"repo": "SilentSolution", "path": "src/graphics/models.py", "line": 254, "rule": "unused-parameter", "fingerprint": "1d579d994d1214f8", "label": "real", "why": "seed accepted and ignored"}
+{"repo": "poly-compress", "path": "src/polycompress/baselines.py", "line": 212, "rule": "unused-parameter", "fingerprint": "5676ef1542212ca3", "label": "noise", "why": "shared encoder signature"}
+{"repo": "poly-compress", "path": "src/polycompress/baselines.py", "line": 62, "rule": "unused-parameter", "fingerprint": "380b6877bc18cf60", "label": "noise", "why": "shared encoder signature"}
+{"repo": "Knotwork", "path": "suite/lib/design/contrast.test.ts", "line": 58, "rule": "duplicate-function", "fingerprint": "7aa42296c05b3552", "label": "real", "why": "test re-implements the production channel()"}
+{"repo": "dtn-medical-mesh", "path": "validation/sim/test_compute.py", "line": 47, "rule": "duplicate-function", "fingerprint": "908ab0ae43ccc419", "label": "real", "why": "same nested helper pasted twice"}
+{"repo": "Tableaux", "path": "server/routes/shares.js", "line": 111, "rule": "duplicate-function", "fingerprint": "d7a1a2dd3cf0ea8f", "label": "real", "why": "delete routes differ only by table name"}
+{"repo": "Tableaux", "path": "client/src/components/guestPanel/GuestPanel.jsx", "line": 421, "rule": "duplicate-function", "fingerprint": "ea14416a5b7d6bb6", "label": "real", "why": "same GuestCard JSX block in two components"}
+{"repo": "Toke", "path": "src/engine/scene/fabric.test.ts", "line": 200, "rule": "duplicate-function", "fingerprint": "feda13fcb6dcc4f3", "label": "noise", "why": "tiny test lambdas, same shape, different data"}
+{"repo": "MALLI", "path": "ml/src/data/loaders/synthetic_loader.py", "line": 113, "rule": "duplicate-function", "fingerprint": "f2b72c8322896d08", "label": "real", "why": "two near-identical dataset pipelines"}
+{"repo": "Knotwork", "path": "suite/apps/delegation/ui/panels/CrewPanel.tsx", "line": 154, "rule": "duplicate-function", "fingerprint": "b725a50e33c81053", "label": "noise", "why": "tiny click handlers, different fields"}
+{"repo": "dtn-medical-mesh", "path": "node/bundle.py", "line": 211, "rule": "duplicate-function", "fingerprint": "861a5f13c0ecf0fc", "label": "noise", "why": "one-line encoders of different records"}
+{"repo": "Chromograph", "path": "app/show/page.tsx", "line": 54, "rule": "duplicate-function", "fingerprint": "29bc7492ccd60b6b", "label": "real", "why": "visibility effect copied between pages"}
+{"repo": "Knotwork", "path": "suite/apps/seating/utils/canvasCoords.ts", "line": 105, "rule": "duplicate-function", "fingerprint": "286b052b15e15797", "label": "noise", "why": "small bounds callbacks over different shapes"}
+{"repo": "PortSkylines", "path": "scripts/sim/road_net.gd", "line": 372, "rule": "duplicate-function", "fingerprint": "e9dd848c78f53e1e", "label": "noise", "why": "one-liners calling different functions"}
+{"repo": "Brigade", "path": "src/core/model/defaults.ts", "line": 30, "rule": "duplicate-function", "fingerprint": "8a4aa263e0a1c4fc", "label": "noise", "why": "tiny lookup lambdas, different fields"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/plotDosingBarcode.m", "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around axis styling"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/compare_MC10k_regimens.m", "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around toolbar styling"}
+{"repo": "Medtech", "path": "etl/build_deidentified_cohort.py", "rule": "swallowed-error", "fingerprint": "4cfd38a03691d985", "label": "real", "why": "except Exception pass loses data silently"}
+{"repo": "MALLI", "path": "ml/src/utils/diagnose_full_dataset.py", "rule": "swallowed-error", "fingerprint": "4cfd38a03691d985", "label": "noise", "why": "best-effort close"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/compare_MC10k_regimens.m", "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around legend styling"}
+{"repo": "Medtech", "path": "etl/build_deidentified_cohort.py", "rule": "swallowed-error", "fingerprint": "4cfd38a03691d985", "label": "real", "why": "except Exception pass loses data silently"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/compare_MC10k_regimens.m", "rule": "swallowed-error", "fingerprint": "36a08abebcef9217", "label": "real", "why": "empty catch around tick styling"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber_review.py", "rule": "swallowed-error", "fingerprint": "4cfd38a03691d985", "label": "noise", "why": "best-effort file cleanup"}
+{"repo": "MALLI", "path": "mobile/lib/screens/camera_capture_screen.dart", "rule": "commented-error", "fingerprint": "0d28f953e1b11eb8", "label": "real", "why": "'ignore for scaffold' is a shrug"}
+{"repo": "Tableaux", "path": "client/src/api/client.js", "rule": "commented-error", "fingerprint": "f76e4757a0a2f4b3", "label": "real", "why": "'ignore' is a shrug"}
+{"repo": "Toke", "path": "src/engine/db/database.ts", "rule": "commented-error", "fingerprint": "f76e4757a0a2f4b3", "label": "real", "why": "'ignore' on a failed ROLLBACK"}
+{"repo": "Tableaux", "path": "client/src/hooks/useAutoSave.js", "rule": "commented-error", "fingerprint": "f76e4757a0a2f4b3", "label": "real", "why": "'ignore' is a shrug"}
+{"repo": "Tableaux", "path": "client/src/hooks/useAutoSave.js", "rule": "commented-error", "fingerprint": "cc797696eb47aa5a", "label": "noise", "why": "names the expected failure (malformed backup)"}
+{"repo": "cadence", "path": "src/state/persist.ts", "rule": "commented-error", "fingerprint": "544295d6e07eb9eb", "label": "real", "why": "'Nothing to do' is a shrug"}
+{"repo": "PortDB", "path": "frontend/src/overlays.tsx", "rule": "commented-error", "fingerprint": "b34a1bf9cc005101", "label": "noise", "why": "'next tick' is a retry reason"}
+{"repo": "Brigade", "path": "src/state/persist.ts", "rule": "commented-error", "fingerprint": "544295d6e07eb9eb", "label": "real", "why": "'Nothing to do' is a shrug"}
+{"repo": "Medtech", "path": "etl/build_deidentified_cohort.py", "rule": "broad-except", "fingerprint": "8dc6231d5e98115f", "label": "real", "why": "returns an empty frame on any error"}
+{"repo": "PBPK-ABM-thesis", "path": "scripts/python/export_outputs_to_excel.py", "rule": "broad-except", "fingerprint": "1419c7d70759a1ec", "label": "real", "why": "fallback hides bugs; AttributeError meant"}
+{"repo": "MALLI", "path": "ml/src/data/loaders/nih_loader.py", "rule": "broad-except", "fingerprint": "a711614fa2edaa6f", "label": "real", "why": "defensive catch around getattr"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber_review.py", "rule": "broad-except", "fingerprint": "b88def2cbb3863b5", "label": "real", "why": "optional import should catch ImportError"}
+{"repo": "MALLI", "path": "ml/src/utils/diagnose_full_dataset.py", "rule": "broad-except", "fingerprint": "23e3bdc32f479dc4", "label": "real", "why": "config parse should catch specific errors"}
+{"repo": "MALLI", "path": "ml/src/models/roi_detection/roi_grabber_yolo.py", "rule": "broad-except", "fingerprint": "9e19735eb0566d9b", "label": "real", "why": "optional import should catch ImportError"}
+{"repo": "MALLI", "path": "ml/src/utils/diagnose_full_dataset.py", "rule": "broad-except", "fingerprint": "17877d1122edbb06", "label": "real", "why": "any error becomes None"}
+{"repo": "MALLI", "path": "ml/src/data/loaders/smear_roi_loader.py", "rule": "broad-except", "fingerprint": "bd74ed271fa0da73", "label": "real", "why": "any error becomes False"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "rule": "type-escape", "fingerprint": "4ca380791021d7db", "label": "real", "why": "any in production code"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "rule": "type-escape", "fingerprint": "0be222aee8d6a99a", "label": "real", "why": "any in production code"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "rule": "type-escape", "fingerprint": "8de6dc1c9a96f1b0", "label": "real", "why": "any in production code"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "rule": "type-escape", "fingerprint": "8f8eaeed7b200720", "label": "real", "why": "any in production code"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "rule": "type-escape", "fingerprint": "35a897028effb31e", "label": "real", "why": "any in production code"}
+{"repo": "PortDB", "path": "frontend/src/world.ts", "rule": "type-escape", "fingerprint": "a7feddf77d65e41e", "label": "real", "why": "any in production code"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_phenotype.cpp", "rule": "pass-through-wrapper", "fingerprint": "2f985799e1352718", "label": "noise", "why": "out-of-class C++ method delegating"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_microenvironment.cpp", "rule": "pass-through-wrapper", "fingerprint": "c1ba8606cf66cc9d", "label": "noise", "why": "out-of-class C++ method delegating"}
+{"repo": "phase-trace", "path": "tracer/tests/test_boundary_scoring.py", "rule": "pass-through-wrapper", "fingerprint": "deb7db1688658515", "label": "noise", "why": "adds a default (seed=7)"}
+{"repo": "Knotwork", "path": "suite/apps/stationery/render/pdf/calibrationPdf.ts", "rule": "pass-through-wrapper", "fingerprint": "15912944c9a772e4", "label": "real", "why": "local alias of mmToPt"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_microenvironment.cpp", "rule": "pass-through-wrapper", "fingerprint": "6c05ae1943e0f286", "label": "noise", "why": "out-of-class C++ method delegating"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_matlab.cpp", "rule": "pass-through-wrapper", "fingerprint": "ccc65b702b92455f", "label": "real", "why": "alias of write_matlab4_header"}
+{"repo": "SilentSolution", "path": "src/stations.py", "rule": "pass-through-wrapper", "fingerprint": "9913ce15b1c34362", "label": "noise", "why": "shorthand that adds defaults"}
+{"repo": "Plaque", "path": "src/render/pdf/calibrationPdf.ts", "rule": "pass-through-wrapper", "fingerprint": "15912944c9a772e4", "label": "real", "why": "local alias of mmToPt"}
+{"repo": "MALLI", "path": "mobile/lib/services/image_processor.dart", "rule": "unused-parameter", "fingerprint": "612e25c74d577199", "label": "real", "why": "dummy deprecated stub ignores path"}
+{"repo": "phase-trace", "path": "report/momentum.js", "rule": "unused-parameter", "fingerprint": "9798393579dd7a69", "label": "real", "why": "homeName/awayName accepted and ignored"}
+{"repo": "VibeSim", "path": "tests/test_geo.py", "rule": "unused-parameter", "fingerprint": "a0e8f9a90518eb0f", "label": "noise", "why": "test double must match urlopen's signature"}
+{"repo": "dtn-medical-mesh", "path": "validation/sim/test_radio.py", "rule": "unused-parameter", "fingerprint": "d7949fbe811944b5", "label": "noise", "why": "test double must match dispatch's signature"}
+{"repo": "dtn-medical-mesh", "path": "validation/sim/test_compute.py", "rule": "unused-parameter", "fingerprint": "147bad1fffa73177", "label": "noise", "why": "test double must match handle's signature"}
+{"repo": "PBPK-ABM-thesis", "path": "scripts/python/export_outputs_to_excel.py", "rule": "unused-parameter", "fingerprint": "25f7e479c2c2238c", "label": "real", "why": "highlight_df accepted and ignored"}
+{"repo": "VibeSim", "path": "tests/test_claude_compiler.py", "rule": "unused-parameter", "fingerprint": "e0345db58987d797", "label": "noise", "why": "test double must match the client's signature"}
+{"repo": "linkedin-puzzle-solvers", "path": "play/static/games/patches.js", "rule": "unused-parameter", "fingerprint": "b87d2fa665f4e410", "label": "noise", "why": "plugin entry point with an imposed signature"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_rules.cpp", "rule": "restating-comment", "fingerprint": "2d28b2f7428daf0e", "label": "real", "why": "'enabled?' restates the if"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_MultiCellDS.cpp", "rule": "restating-comment", "fingerprint": "06db1027a001d56a", "label": "real", "why": "'next, filename' narrates the declaration"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/visualization/plot_simulation_single_run.m", "rule": "restating-comment", "fingerprint": "cdaa29105d637503", "label": "real", "why": "'Create stats table' above table()"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/analysis/MC_5FU_PK_sensitivity.m", "rule": "restating-comment", "fingerprint": "c910210a1cbba9b9", "label": "real", "why": "'Create figure' above figure()"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_cell.cpp", "rule": "restating-comment", "fingerprint": "8f1ab417ce18ea44", "label": "real", "why": "'flag for removal' above flag_for_removal()"}
+{"repo": "PBPK-ABM-thesis", "path": "modules/PhysiCell_MultiCellDS.cpp", "rule": "restating-comment", "fingerprint": "f05718f32c7edf59", "label": "real", "why": "'current index' above int index = 0"}
+{"repo": "PBPK-ABM-thesis", "path": "unit_tests/custom_DCs_2substrates/custom_modules/custom_v1.cpp", "rule": "comment-flood", "fingerprint": "36951ebe0e7cdaa3", "label": "noise", "why": "commented-out code, not narration"}
+{"repo": "PBPK-ABM-thesis", "path": "custom_modules/custom.cpp", "rule": "comment-flood", "fingerprint": "4352235633a8c4b4", "label": "real", "why": "line-by-line narration"}
+{"repo": "PBPK-ABM-thesis", "path": "addons/libRoadrunner/src/librr_intracellular.cpp", "rule": "comment-flood", "fingerprint": "587824306dceb9d5", "label": "noise", "why": "commented-out code"}
+{"repo": "PBPK-ABM-thesis", "path": "unit_tests/custom_DCs_2substrates/custom_modules/custom_v2.cpp", "rule": "comment-flood", "fingerprint": "36951ebe0e7cdaa3", "label": "noise", "why": "commented-out code"}
+{"repo": "PBPK-ABM-thesis", "path": "addons/libRoadrunner/src/librr_intracellular.cpp", "rule": "comment-flood", "fingerprint": "c13da93720dc87f6", "label": "noise", "why": "commented-out code"}
+{"repo": "WarRoom", "path": "services/referee/src/app.py", "rule": "comment-flood", "fingerprint": "c5ff4bf7d49d36a6", "label": "noise", "why": "one explanatory sentence split over two lines"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_matlab.cpp", "rule": "comment-flood", "fingerprint": "6230aad8655c4499", "label": "noise", "why": "commented-out code"}
+{"repo": "PBPK-ABM-thesis", "path": "matlab/pbpk/run5FU_PBPK_Simulation.m", "rule": "comment-flood", "fingerprint": "0620bbfffb542e1b", "label": "real", "why": "section narration (% Concentrations, % Parameters)"}
+{"repo": "Knotwork", "path": "suite/app/api/suppliers/route.ts", "rule": "duplicate-function", "fingerprint": "0c5c386c7ceaac3a", "label": "real", "why": "route handlers repeat the same auth boilerplate"}
+{"repo": "img-bezier-fit", "path": "src/curves.py", "rule": "duplicate-function", "fingerprint": "1a2e18137b16c895", "label": "real", "why": "module copied into legacy/"}
+{"repo": "PBPK-ABM-thesis", "path": "BioFVM/BioFVM_vector.cpp", "rule": "duplicate-function", "fingerprint": "6f7518422211e311", "label": "noise", "why": "parallel vector operators"}
+{"repo": "PortSkylines", "path": "tests/test_empties.gd", "rule": "duplicate-function", "fingerprint": "a85143fa644edb22", "label": "real", "why": "test helper pasted into many files"}
+{"repo": "Tableaux", "path": "server/routes/export.js", "rule": "duplicate-function", "fingerprint": "65f53fb13da7f70f", "label": "noise", "why": "one-line comparator"}
+{"repo": "Knotwork", "path": "suite/apps/seating/components/guestPanel/GroupBlock.tsx", "rule": "duplicate-function", "fingerprint": "dfa9435d8803d079", "label": "real", "why": "same key handler in two components"}
+{"repo": "PBPK-ABM-thesis", "path": "core/PhysiCell_phenotype.cpp", "rule": "duplicate-function", "fingerprint": "04bdab878a3ea202", "label": "real", "why": "near-copy setters"}
+{"repo": "Plaque", "path": "src/core/text/layout.test.ts", "rule": "duplicate-function", "fingerprint": "a47cd532e77a466f", "label": "noise", "why": "tests differing only in data"}

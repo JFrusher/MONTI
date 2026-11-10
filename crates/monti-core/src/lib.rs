@@ -71,7 +71,7 @@ pub struct Finding {
     /// 1-based.
     pub column: usize,
     pub fix: Option<Fix>,
-    /// Hash of the rule and the trimmed text of the finding's line: stable when code moves,
+    /// Hash of the rule, the finding's line and the next non-blank line (trimmed): stable when code moves,
     /// so baselines and SARIF can track a finding across edits.
     pub fingerprint: String,
 }
@@ -88,8 +88,11 @@ fn finish(mut findings: Vec<Finding>, src: &str) -> Vec<Finding> {
     let lines: Vec<&str> = src.lines().collect();
     findings.retain(|f| !ignored(f, &lines));
     for f in &mut findings {
+        // The next non-blank line too: a bare `} catch {` or MATLAB `catch` repeats within a file, its
+        // body or comment rarely does.
         let text = lines.get(f.line - 1).map_or("", |l| l.trim());
-        f.fingerprint = format!("{:016x}", index::hash((&f.rule_id, text)));
+        let next = lines.iter().skip(f.line).map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("");
+        f.fingerprint = format!("{:016x}", index::hash((&f.rule_id, text, next)));
     }
     findings.sort_by(|a, b| (a.line, a.column, &a.rule_id, &a.message).cmp(&(b.line, b.column, &b.rule_id, &b.message)));
     findings
@@ -151,11 +154,11 @@ impl FileReport {
     }
 }
 
-/// Runs the per-file rules that apply to `lang` against `source`. Repo-wide rules
-/// (duplicates, ghost abstractions) need [`scan_path`].
-pub fn scan(lang: Language, source: &str, rules: &[Rule]) -> Result<Vec<Finding>> {
+/// Runs the per-file rules that apply to `lang` against `source` (the contents of `path`, which
+/// need not exist on disk). Repo-wide rules (duplicates, ghost abstractions) need [`scan_path`].
+pub fn scan(lang: Language, path: &Path, source: &str, rules: &[Rule]) -> Result<Vec<Finding>> {
     let (analysed, tree) = parse_for_rules(lang, source)?;
-    let mut findings = finish(scan_tree(lang, tree.root_node(), &analysed, rules), source);
+    let mut findings = finish(scan_tree(lang, path, tree.root_node(), &analysed, rules), source);
     // One file cannot prove a name is unused elsewhere.
     for f in &mut findings {
         f.fix = f.fix.take().filter(|fix| fix.requires_local.is_empty());
@@ -163,9 +166,21 @@ pub fn scan(lang: Language, source: &str, rules: &[Rule]) -> Result<Vec<Finding>
     Ok(findings)
 }
 
-fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Finding> {
+/// Test files by convention: `tests/`, `test/`, `__tests__/`, `e2e/`, `spec/` directories, or
+/// `*.test.*`, `*.spec.*`, `test_*`, `*_test.*` names.
+pub fn is_test_path(path: &Path) -> bool {
+    let dir = path.parent().into_iter().flat_map(|p| p.components()).any(|c| {
+        matches!(c.as_os_str().to_str(), Some("tests" | "test" | "__tests__" | "e2e" | "spec"))
+    });
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    dir || name.contains(".test.") || name.contains(".spec.") || name.starts_with("test_") || stem.ends_with("_test")
+}
+
+fn scan_tree(lang: Language, path: &Path, root: Node, src: &str, rules: &[Rule]) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for rule in rules.iter().filter(|r| r.languages.contains(&lang)) {
+    let test_file = is_test_path(path);
+    for rule in rules.iter().filter(|r| r.languages.contains(&lang) && !(r.skip_tests && test_file)) {
         let hits: Vec<Hit> = match &rule.check {
             Check::Query(queries) => {
                 let mut cursor = QueryCursor::new();
@@ -173,7 +188,9 @@ fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Findi
                 let mut hits = Vec::new();
                 while let Some(m) = matches.next() {
                     let node = m.captures().iter().map(|c| c.node).min_by_key(|n| n.start_byte()).unwrap();
-                    hits.push(Hit { node, fix: None, note: None });
+                    if !(rule.unless_comment_explains && detect::comments_explain(node, src)) {
+                        hits.push(Hit { node, fix: None, note: None });
+                    }
                 }
                 hits
             }
@@ -305,7 +322,7 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
     let analysed = par_map(&sources, |s| {
         let root_node = s.tree.root_node();
         let report = FileReport {
-            findings: scan_tree(s.language, root_node, &s.text, rules),
+            findings: scan_tree(s.language, &s.path, root_node, &s.text, rules),
             metrics: metrics::measure(root_node, &s.text),
             path: s.path.clone(),
             language: s.language,
@@ -327,23 +344,39 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
         };
         match rule.check {
             Check::DuplicateFunction { min_similarity } => {
+                // One finding per copy, naming its closest match: N copies of a helper give N
+                // findings, not N * (N - 1).
+                let mut matches: Copies = HashMap::new();
                 for (a, b, s) in index.duplicates(min_similarity) {
                     if !rule.languages.contains(&a.language) {
                         continue;
                     }
-                    for (this, other) in [(a, b), (b, a)] {
-                        let message = format!(
-                            "{} ({:.0}% match with `{}` at {}:{})",
-                            rule.message,
-                            s * 100.0,
-                            other.name,
-                            other.path.display(),
-                            other.line
-                        );
-                        // Keep the first copy; the second gets the merge fix.
-                        let fix = if this.range == b.range && this.path == b.path { merge_fix(a, b, by_path[b.path.as_path()]) } else { None };
-                        push(&this.path, this.line, this.column, message, fix);
-                    }
+                    matches.entry(a as *const _).or_insert((a, Vec::new())).1.push((b, s));
+                    matches.entry(b as *const _).or_insert((b, Vec::new())).1.push((a, s));
+                }
+                let mut copies: Vec<_> = matches.into_values().collect();
+                copies.sort_by(|x, y| (&x.0.path, x.0.range.start).cmp(&(&y.0.path, y.0.range.start)));
+                for (this, mut others) in copies {
+                    others.sort_by(|x, y| y.1.total_cmp(&x.1).then((&x.0.path, x.0.line).cmp(&(&y.0.path, y.0.line))));
+                    let (best, s) = others[0];
+                    let more = match others.len() - 1 {
+                        0 => String::new(),
+                        n => format!(" and {n} more"),
+                    };
+                    let message = format!(
+                        "{} ({:.0}% match with `{}` at {}:{}{more})",
+                        rule.message,
+                        s * 100.0,
+                        best.name,
+                        best.path.display(),
+                        best.line
+                    );
+                    // The later of two exact same-file copies gets the merge fix.
+                    let fix = others
+                        .iter()
+                        .find(|(o, s)| *s == 1.0 && o.path == this.path && o.range.start < this.range.start)
+                        .and_then(|(keep, _)| merge_fix(keep, this, by_path[this.path.as_path()]));
+                    push(&this.path, this.line, this.column, message, fix);
                 }
             }
             Check::GhostAbstraction => {
@@ -363,6 +396,9 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
     }
     Ok(Scan { files: reports, skipped })
 }
+
+/// Each duplicated function (keyed by address) with the functions it matches and how closely.
+type Copies<'a> = HashMap<*const index::FnEntry, (&'a index::FnEntry, Vec<(&'a index::FnEntry, f64)>)>;
 
 /// Aggressive fix for an exact same-file copy: delete `drop` and call `keep` instead. Only when
 /// bodies and parameter lists are identical text (whitespace aside) and both are top-level.

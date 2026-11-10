@@ -42,6 +42,6 @@ from net import log, send, shape
 def report(data, verbose):
     try:
         send(data)
-    except Exception as e:
-        log(e)
+    except Exception:
+        return None
     return shape(data)  # type: ignore

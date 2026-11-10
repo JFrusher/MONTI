@@ -19,7 +19,7 @@ export function setAge(user: { age: number }): void {
 }
 
 export function fetchUser(id: string, opts: object) {
-  return api.fetchUser(id, opts);
+  return fetchUserById(id, opts);
 }
 
 export function build(): Widget {

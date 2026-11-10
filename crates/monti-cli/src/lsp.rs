@@ -76,8 +76,9 @@ fn merge(mut a: Value, b: Value) -> Value {
 /// `None` when the file is not a supported language or does not parse (mid-edit): callers then
 /// leave the previous diagnostics in place instead of flickering them away.
 fn findings(uri: &str, text: &str, rules: &[Rule]) -> Option<Vec<Finding>> {
-    let lang = Language::from_path(&uri_to_path(uri))?;
-    monti_core::scan(lang, text, rules).ok()
+    let path = uri_to_path(uri);
+    let lang = Language::from_path(&path)?;
+    monti_core::scan(lang, &path, text, rules).ok()
 }
 
 fn publish(out: &mut impl Write, uri: &str, text: &str, rules: &[Rule]) -> Result<()> {
@@ -200,7 +201,7 @@ mod tests {
 
     #[test]
     fn diagnostics_and_quick_fixes() {
-        let src = "def f():\n    # increment count\n    count += 1\n    try:\n        print()\n    except E:\n        pass\n";
+        let src = "def f():\n    # increment count\n    count += 1\n    try:\n        print()\n    except Exception:\n        pass\n";
         let uri = "file:///tmp/monti%20lsp/a.py";
         let input = [
             frame(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": null}})),

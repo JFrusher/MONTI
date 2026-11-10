@@ -3,15 +3,19 @@
 #   max_comment_code_ratio  per function, with `languages`
 #   check                   built-in detector (see README), with `languages`
 # `languages = ["*"]` means every language the check supports.
+# Optional on any rule: `skip_tests = true` (not applied to test files), `unless_comment_explains =
+# true` (dropped when a comment in the flagged code gives a reason, not just "ignore").
 
 [rules.swallowed-error]
 severity = "error"
-message = "Error handler is empty: the error is swallowed. Handle it, log it, or let it propagate."
+message = "Error handler is empty and catches everything: the error is swallowed. Handle it, log it, or let it propagate."
 
 [rules.swallowed-error.queries]
 cpp = '''
 (catch_clause
+  parameters: (parameter_list) @params
   body: (compound_statement) @block
+  (#eq? @params "(...)")
   (#match? @block "^\\{\\s*\\}$"))
 '''
 csharp = '''
@@ -57,6 +61,7 @@ php = '''
 '''
 python = '''
 ((except_clause (block . (pass_statement) .) @block) @clause
+  (#match? @clause "^except\\s*(\\(?\\s*(Exception|BaseException)\\s*\\)?)?(\\s+as\\s+\\w+)?\\s*:")
   (#not-match? @clause "#"))
 '''
 ruby = '''
@@ -92,6 +97,7 @@ typescript = '''
 [rules.commented-error]
 severity = "warning"
 message = "Error handler holds only comments. Check that swallowing the error is deliberate."
+unless_comment_explains = true
 
 [rules.commented-error.queries]
 cpp = '''
@@ -208,6 +214,7 @@ lua = '''
 [rules.type-escape]
 severity = "warning"
 message = "Type or lint check silenced without naming what. Fix the type, or name the specific code."
+skip_tests = true
 
 [rules.type-escape.queries]
 python = '''
@@ -231,13 +238,17 @@ javascript = '''
 
 [rules.broad-except]
 severity = "warning"
-message = "Catches every exception and never re-raises. Catch the specific error you expect."
+message = "Catches every exception without reporting or re-raising it. Catch the specific error you expect."
 
 [rules.broad-except.queries]
 python = '''
 ((except_clause) @clause
-  (#match? @clause "^except(\\s+\\(?\\s*(Exception|BaseException)\\s*\\)?(\\s+as\\s+\\w+)?)?\\s*:")
+  (#match? @clause "^except\\s*:")
   (#not-match? @clause "\\braise\\b")
+  (#not-match? @clause "^[^:]*:(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$"))
+((except_clause) @clause
+  (#match? @clause "^except\\s+\\(?\\s*(Exception|BaseException)\\s*\\)?\\s*:")
+  (#not-match? @clause "\\b(raise|log\\w*|logger|logging|traceback|warn\\w*)\\b")
   (#not-match? @clause "^[^:]*:(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$"))
 '''
 
@@ -250,6 +261,7 @@ check = "undefined-name"
 [rules.unused-parameter]
 severity = "warning"
 message = "Parameter is never used."
+skip_tests = true
 languages = ["*"]
 check = "unused-parameter"
 

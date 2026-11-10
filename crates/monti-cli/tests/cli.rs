@@ -7,7 +7,7 @@ const MONTI: &str = env!("CARGO_BIN_EXE_monti");
 mod common;
 use common::temp_dir;
 
-const SLOP: &str = "def build():\n    items = []\n    if items is not None:\n        items.append(1)\n    return items\n\n\ndef load(p):\n    try:\n        return open(p).read()\n    except OSError:\n        pass\n";
+const SLOP: &str = "def build():\n    items = []\n    if items is not None:\n        items.append(1)\n    return items\n\n\ndef load(p):\n    try:\n        return open(p).read()\n    except Exception:\n        pass\n";
 
 #[test]
 fn scan_reports_and_fails_on_errors() {
@@ -62,7 +62,7 @@ fn git(dir: &std::path::Path, args: &[&str]) {
     assert!(ok, "git {args:?}");
 }
 
-const SWALLOW: &str = "def f():\n    try:\n        print()\n    except E:\n        pass\n";
+const SWALLOW: &str = "def f():\n    try:\n        print()\n    except Exception:\n        pass\n";
 
 #[test]
 fn since_reports_only_changed_lines() {

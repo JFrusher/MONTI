@@ -15,6 +15,11 @@ use tree_sitter::Node;
 const SIGNATURE: usize = 64;
 const BANDS: usize = 16;
 
+/// Below this many body nodes, a duplicate must match with identifier names kept: small functions
+/// of the same shape but different names (`(tag) => teams.find(...)?.id` vs `(id) =>
+/// people.find(...)?.name`) are not copies; small copy-pastes keep their names.
+const EXACT_BELOW: usize = 100;
+
 /// Bodies smaller than this many AST nodes all look alike; they are not compared.
 const MIN_NODES: usize = 20;
 
@@ -27,6 +32,8 @@ pub struct FnEntry {
     pub(crate) range: Range<usize>,
     size: usize,
     shingles: HashSet<u64>,
+    /// Shingles that keep identifier names, for small functions (see [`EXACT_BELOW`]).
+    named: HashSet<u64>,
     signature: [u64; SIGNATURE],
 }
 
@@ -88,7 +95,8 @@ impl Index {
 
     fn add(&mut self, path: &Path, lang: Language, root: Node, src: &str) {
         for f in functions(lang, root) {
-            let (shingles, size) = shingles(f, src);
+            let (shingles, size) = shingles(f, src, false);
+            let named = shingles_named(f, src);
             let p = f.start_position();
             self.functions.push(FnEntry {
                 path: path.to_path_buf(),
@@ -100,6 +108,7 @@ impl Index {
                 size,
                 signature: minhash(&shingles),
                 shingles,
+                named,
             });
         }
         for n in descendants(root) {
@@ -147,7 +156,7 @@ impl Index {
             if a.language != b.language || nested {
                 continue;
             }
-            let s = jaccard(&a.shingles, &b.shingles);
+            let s = similarity(a, b);
             if s >= min {
                 out.push((a, b, s));
             }
@@ -155,12 +164,14 @@ impl Index {
         out
     }
 
-    /// Indexed functions that match a proposed function by name or by structure.
+    /// Indexed functions that match a proposed function by name or by structure. Unlike
+    /// [`Index::duplicates`] this ignores identifier names at every size: an agent asking "does this
+    /// exist?" uses new names, and a wrong candidate costs it one look.
     pub fn similar(&self, lang: Language, root: Node, src: &str, min: f64) -> Vec<Similar<'_>> {
         let mut out = Vec::new();
         for f in functions(lang, root) {
             let proposed = fn_name(f, src);
-            let (sh, size) = shingles(f, src);
+            let (sh, size) = shingles(f, src, false);
             for e in self.functions.iter().filter(|e| e.language == lang) {
                 let similarity = jaccard(&sh, &e.shingles);
                 let structural = size >= MIN_NODES && e.size >= MIN_NODES && similarity >= min;
@@ -202,20 +213,28 @@ pub(crate) fn fn_name(f: Node, src: &str) -> String {
     "<anonymous>".into()
 }
 
+fn similarity(a: &FnEntry, b: &FnEntry) -> f64 {
+    if a.size.min(b.size) < EXACT_BELOW { jaccard(&a.named, &b.named) } else { jaccard(&a.shingles, &b.shingles) }
+}
+
+fn shingles_named(f: Node, src: &str) -> HashSet<u64> {
+    shingles(f, src, true).0
+}
+
 /// 3-grams of the function body's pre-order token sequence, plus the token count.
 /// Only the body: matching signatures (interface stubs) are not duplicated logic.
-fn shingles(f: Node, src: &str) -> (HashSet<u64>, usize) {
+fn shingles(f: Node, src: &str, keep_names: bool) -> (HashSet<u64>, usize) {
     let body = f.child_by_field_name("body").unwrap_or(f);
     let tokens: Vec<u64> =
-        descendants(body).into_iter().filter(|n| !is_comment(n.kind())).map(|n| token(n, src)).collect();
+        descendants(body).into_iter().filter(|n| !is_comment(n.kind())).map(|n| token(n, src, keep_names)).collect();
     let set = tokens.windows(3).map(hash).collect();
     (set, tokens.len())
 }
 
-/// Identifiers reduce to their kind, so renamed copies match. Literal values stay,
-/// so code differing only in its data (table-like tests) does not.
-fn token(n: Node, src: &str) -> u64 {
-    if n.is_named() && n.child_count() == 0 && !n.kind().ends_with("identifier") {
+/// Identifiers reduce to their kind (unless `keep_names`), so renamed copies match. Literal values
+/// stay, so code differing only in its data (table-like tests) does not.
+fn token(n: Node, src: &str, keep_names: bool) -> u64 {
+    if n.is_named() && n.child_count() == 0 && (keep_names || !n.kind().ends_with("identifier")) {
         hash((n.kind_id(), &src[n.byte_range()]))
     } else {
         n.kind_id() as u64
