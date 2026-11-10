@@ -1,0 +1,5 @@
+3 swallowed-error
+4 commented-error
+7 pass-through-wrapper
+11 redundant-null-check
+18 restating-comment

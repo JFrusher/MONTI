@@ -1,12 +1,16 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use monti_core::ast::Language;
-use monti_core::rules::{self, CONFIG_FILE, DEFAULT_RULES, Severity};
-use monti_core::{Edit, apply_fixes, scan_path};
+use monti_core::rules::{self, CONFIG_FILE, DEFAULT_RULES};
+use monti_core::{Fix, FixLevel, apply_fixes, scan_path};
 use std::fs;
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+mod gate;
+mod lsp;
+mod output;
 
 #[derive(Parser)]
 #[command(name = "monti", version, about = "Deterministic anti-slop code sweeper")]
@@ -17,8 +21,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Report findings and per-file slop scores. Exits 1 when any error-severity finding exists.
+    /// Report findings and per-file slop scores. Exits 1 when any error-severity finding remains
+    /// after `--since`, the baseline file and `monti-ignore` comments.
     Scan {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        #[arg(long, value_enum, default_value = "text")]
+        format: output::Format,
+        /// Only report findings on lines changed since this git ref (e.g. `origin/main`, `HEAD`).
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Accept every current finding: write them to .monti-baseline.json, which `scan` then hides.
+    Baseline {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -29,6 +44,10 @@ enum Cmd {
         /// Confirm each fix on stdin.
         #[arg(long)]
         interactive: bool,
+        /// safe: delete restating comments. standard: + unwrap redundant null checks.
+        /// aggressive: + inline private pass-through wrappers and merge exact same-file copies.
+        #[arg(long, value_enum, default_value = "standard")]
+        level: Level,
         /// Skip prettier / ruff / rustfmt / gofmt on changed files.
         #[arg(long)]
         no_format: bool,
@@ -43,15 +62,27 @@ enum Cmd {
     },
     /// Serve MCP over stdio, rooted at the current directory.
     Mcp,
+    /// Serve the Language Server Protocol over stdio: findings as diagnostics, fixes as quick fixes.
+    Lsp,
+    /// Print a file's syntax tree (node kinds and field names), for writing rules and language specs.
+    Tree { file: PathBuf },
 }
 
 fn main() -> Result<ExitCode> {
     match Cli::parse().command {
-        Cmd::Scan { path } => scan(&path),
-        Cmd::Fix { path, interactive, no_format, no_verify } => {
-            fix(&path, interactive, no_format, no_verify).map(|()| ExitCode::SUCCESS)
+        Cmd::Scan { path, format, since } => scan(&path, format, since.as_deref()),
+        Cmd::Baseline { path } => {
+            let files = scan_path(&path, &rules::load(&path)?)?.files;
+            let n = gate::write_baseline(gate::root_dir(&path), &files)?;
+            println!("accepted {n} findings into {}", gate::root_dir(&path).join(gate::BASELINE_FILE).display());
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Fix { path, interactive, level, no_format, no_verify } => {
+            fix(&path, interactive, level.into(), no_format, no_verify).map(|()| ExitCode::SUCCESS)
         }
         Cmd::Init { path } => init(&path).map(|()| ExitCode::SUCCESS),
+        Cmd::Lsp => lsp::serve(std::io::stdin().lock(), std::io::stdout().lock()).map(|()| ExitCode::SUCCESS),
+        Cmd::Tree { file } => tree(&file).map(|()| ExitCode::SUCCESS),
         Cmd::Mcp => {
             let root = std::env::current_dir()?;
             monti_mcp::serve(&root, std::io::stdin().lock(), std::io::stdout().lock()).map(|()| ExitCode::SUCCESS)
@@ -59,30 +90,16 @@ fn main() -> Result<ExitCode> {
     }
 }
 
-fn scan(path: &Path) -> Result<ExitCode> {
-    let reports = scan_path(path, &rules::load(path)?)?;
-    let color = std::io::stdout().is_terminal();
-    let paint = |code: &str, s: &str| if color { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() };
-    let (mut errors, mut warnings) = (0, 0);
-    for r in reports.iter().filter(|r| !r.findings.is_empty()) {
-        println!("{}  slop score {:.1}", paint("1", &r.path.display().to_string()), r.slop_score());
-        for f in &r.findings {
-            let severity = match f.severity {
-                Severity::Error => {
-                    errors += 1;
-                    paint("31", "error  ")
-                }
-                Severity::Warning => {
-                    warnings += 1;
-                    paint("33", "warning")
-                }
-            };
-            println!("  {:>5}:{:<4} {severity}  {:<22} {}", f.line, f.column, f.rule_id, f.message);
-        }
-        println!();
+fn scan(path: &Path, format: output::Format, since: Option<&str>) -> Result<ExitCode> {
+    let rules = rules::load(path)?;
+    let mut scan = scan_path(path, &rules)?;
+    let root = gate::root_dir(path);
+    if let Some(base) = since {
+        gate::keep_changed(root, base, &mut scan.files)?;
     }
-    println!("{} files scanned, {errors} errors, {warnings} warnings", reports.len());
-    Ok(if errors > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    gate::apply_baseline(root, &mut scan.files)?;
+    print!("{}", output::render(format, &scan, &rules));
+    Ok(if output::has_errors(&scan) { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 struct Change {
@@ -92,26 +109,47 @@ struct Change {
     fixed: String,
 }
 
-fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Result<()> {
-    let reports = scan_path(path, &rules::load(path)?)?;
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum Level {
+    Safe,
+    Standard,
+    Aggressive,
+}
+
+impl From<Level> for FixLevel {
+    fn from(l: Level) -> FixLevel {
+        match l {
+            Level::Safe => FixLevel::Safe,
+            Level::Standard => FixLevel::Standard,
+            Level::Aggressive => FixLevel::Aggressive,
+        }
+    }
+}
+
+fn fix(path: &Path, interactive: bool, level: FixLevel, no_format: bool, no_verify: bool) -> Result<()> {
+    let reports = scan_path(path, &rules::load(path)?)?.files;
     let mut answers = std::io::stdin().lock().lines();
     let mut changes = Vec::new();
     for r in reports {
         let original = fs::read_to_string(&r.path)?;
-        let mut accepted: Vec<&Edit> = Vec::new();
+        let mut accepted: Vec<&Fix> = Vec::new();
         for f in &r.findings {
-            let Some(edit) = &f.fix else { continue };
+            let Some(fix) = f.fix.as_ref().filter(|fix| fix.level <= level) else { continue };
             if interactive {
                 println!("{}:{}  [{}] {}", r.path.display(), f.line, f.rule_id, f.message);
-                original[edit.start..edit.end].lines().for_each(|l| println!("  - {l}"));
-                edit.replacement.lines().for_each(|l| println!("  + {l}"));
+                for e in &fix.edits {
+                    let line = original[..e.start].lines().count().max(1);
+                    println!("  @ line {line}");
+                    original[e.start..e.end].lines().for_each(|l| println!("  - {l}"));
+                    e.replacement.lines().for_each(|l| println!("  + {l}"));
+                }
                 print!("apply? [y/N] ");
                 std::io::stdout().flush()?;
                 if answers.next().context("stdin closed")??.trim() != "y" {
                     continue;
                 }
             }
-            accepted.push(edit);
+            accepted.push(fix);
         }
         if !accepted.is_empty() {
             let fixed = apply_fixes(&original, &accepted);
@@ -129,8 +167,9 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
     }
     if !no_format {
         for c in &changes {
-            let bin = formatter(c.language)[0];
-            ensure!(on_path(bin), "formatter `{bin}` not found; install it or pass --no-format");
+            if let [bin, ..] = c.language.spec().formatter {
+                ensure!(on_path(bin), "formatter `{bin}` not found; install it or pass --no-format");
+            }
         }
     }
 
@@ -140,7 +179,8 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
     let outcome = (|| -> Result<()> {
         if !no_format {
             for c in &changes {
-                let [bin, args @ ..] = formatter(c.language) else { unreachable!() };
+                // Languages without a formatter in their spec are written as fixed.
+                let [bin, args @ ..] = c.language.spec().formatter else { continue };
                 ensure!(Command::new(bin).args(args).arg(&c.path).status()?.success(), "`{bin}` failed on {}", c.path.display());
             }
         }
@@ -159,15 +199,6 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
         println!("fixed {}", c.path.display());
     }
     Ok(())
-}
-
-fn formatter(lang: Language) -> &'static [&'static str] {
-    match lang {
-        Language::TypeScript | Language::Tsx | Language::JavaScript => &["prettier", "--write"],
-        Language::Python => &["ruff", "format"],
-        Language::Rust => &["rustfmt", "--edition", "2024"],
-        Language::Go => &["gofmt", "-w"],
-    }
 }
 
 fn on_path(bin: &str) -> bool {
@@ -200,6 +231,33 @@ fn test_suites(path: &Path) -> Result<Vec<(PathBuf, &'static [&'static str])>> {
 fn run(cmd: &[&str], dir: &Path) -> Result<bool> {
     let status = Command::new(cmd[0]).args(&cmd[1..]).current_dir(dir).status();
     Ok(status.with_context(|| format!("running `{}`", cmd.join(" ")))?.success())
+}
+
+fn tree(file: &Path) -> Result<()> {
+    let lang = Language::from_path(file).with_context(|| format!("unsupported file type: {}", file.display()))?;
+    let src = fs::read_to_string(file)?;
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&lang.grammar())?;
+    let tree = parser.parse(&src, None).context("tree-sitter returned no tree")?;
+    let mut cursor = tree.walk();
+    let mut depth = 0;
+    loop {
+        let node = cursor.node();
+        let field = cursor.field_name().map(|f| format!("{f}: ")).unwrap_or_default();
+        let kind = if node.is_named() { node.kind().to_string() } else { format!("{:?}", node.kind()) };
+        let leaf = if node.child_count() == 0 { format!("  {:?}", &src[node.byte_range()]) } else { String::new() };
+        println!("{:indent$}{field}{kind} [{}:{}]{leaf}", "", node.start_position().row + 1, node.start_position().column + 1, indent = depth * 2);
+        if cursor.goto_first_child() {
+            depth += 1;
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return Ok(());
+            }
+            depth -= 1;
+        }
+    }
 }
 
 fn init(dir: &Path) -> Result<()> {

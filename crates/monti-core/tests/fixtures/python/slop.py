@@ -34,3 +34,14 @@ def quiet():
     except Exception:
         # ignore
         pass
+
+
+from net import log, send, shape
+
+
+def report(data, verbose):
+    try:
+        send(data)
+    except Exception:
+        return None
+    return shape(data)  # type: ignore

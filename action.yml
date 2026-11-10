@@ -1,17 +1,39 @@
 name: MONTI slop gate
-description: Fail the job when MONTI finds error-severity LLM slop.
+description: Annotate a PR with LLM slop findings and fail on error-severity ones.
 inputs:
   path:
     description: File or directory to scan.
     default: "."
+  since:
+    description: Only report findings on lines changed since this git ref (e.g. origin/main). Needs fetch-depth 0.
+    default: ""
 runs:
   using: composite
   steps:
     - name: Install monti
       shell: bash
-      run: cargo install --locked --path "$GITHUB_ACTION_PATH/crates/monti-cli"
+      env:
+        MONTI_REF: ${{ github.action_ref }}
+        MONTI_REPO: ${{ github.action_repository }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) target=x86_64-unknown-linux-gnu ;;
+          Linux-ARM64) target=aarch64-unknown-linux-gnu ;;
+          macOS-ARM64) target=aarch64-apple-darwin ;;
+          macOS-X64) target=x86_64-apple-darwin ;;
+          Windows-X64) target=x86_64-pc-windows-msvc ;;
+          *) echo "::error::monti has no release build for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+        esac
+        dir="$RUNNER_TEMP/monti"
+        mkdir -p "$dir"
+        gh release download "$MONTI_REF" --repo "$MONTI_REPO" --pattern "monti-$target.tar.gz" --dir "$dir" \
+          || { echo "::error::No monti release '$MONTI_REF'. Pin the action to a release tag, e.g. $MONTI_REPO@v0.1.0"; exit 1; }
+        tar -xzf "$dir/monti-$target.tar.gz" -C "$dir"
+        echo "$dir" >> "$GITHUB_PATH"
     - name: Scan
       shell: bash
       env:
         MONTI_PATH: ${{ inputs.path }}
-      run: monti scan "$MONTI_PATH"
+        MONTI_SINCE: ${{ inputs.since }}
+      run: monti scan --format github ${MONTI_SINCE:+--since "$MONTI_SINCE"} "$MONTI_PATH"

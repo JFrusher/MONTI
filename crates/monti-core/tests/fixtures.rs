@@ -7,123 +7,79 @@ use std::path::Path;
 mod common;
 use common::temp_dir;
 
-fn hits(lang: Language, src: &str) -> Vec<(String, usize)> {
-    let rules = parse_rules(DEFAULT_RULES).unwrap();
-    scan(lang, src, &rules).unwrap().into_iter().map(|f| (f.rule_id, f.line)).collect()
+fn py() -> Language {
+    Language::named("python").unwrap()
 }
 
-fn owned(v: &[(&str, usize)]) -> Vec<(String, usize)> {
-    v.iter().map(|(id, l)| (id.to_string(), *l)).collect()
+fn go() -> Language {
+    Language::named("go").unwrap()
 }
 
-
-#[test]
-fn typescript_slop_is_flagged() {
-    assert_eq!(
-        hits(Language::TypeScript, include_str!("fixtures/slop.ts")),
-        owned(&[
-            ("swallowed-catch", 4),
-            ("swallowed-catch", 11),
-            ("comment-flood", 15),
-            ("pass-through-wrapper", 21),
-            ("redundant-null-check", 27),
-            ("restating-comment", 36),
-            ("commented-catch", 44),
-        ])
-    );
+fn ts() -> Language {
+    Language::named("typescript").unwrap()
 }
 
-#[test]
-fn python_slop_is_flagged() {
-    assert_eq!(
-        hits(Language::Python, include_str!("fixtures/slop.py")),
-        owned(&[
-            ("swallowed-except", 4),
-            ("comment-flood", 8),
-            ("pass-through-wrapper", 14),
-            ("redundant-null-check", 20),
-            ("comment-flood", 26),
-            ("restating-comment", 27),
-            ("commented-except", 34),
-        ])
-    );
-}
-
-#[test]
-fn rust_slop_is_flagged() {
-    assert_eq!(
-        hits(Language::Rust, include_str!("fixtures/slop.rs")),
-        owned(&[
-            ("swallowed-err-arm", 4),
-            ("pass-through-wrapper", 8),
-            ("restating-comment", 13),
-            ("commented-err-arm", 20),
-        ])
-    );
-}
-
-#[test]
-fn go_slop_is_flagged() {
-    assert_eq!(
-        hits(Language::Go, include_str!("fixtures/slop.go")),
-        owned(&[
-            ("swallowed-err-check", 5),
-            ("pass-through-wrapper", 9),
-            ("redundant-null-check", 15),
-            ("restating-comment", 22),
-            ("commented-err-check", 29),
-        ])
-    );
-}
-
-#[test]
-fn tsx_and_javascript_are_scanned() {
-    assert_eq!(Language::from_path(Path::new("a.tsx")), Some(Language::Tsx));
-    for ext in ["js", "jsx", "mjs", "cjs"] {
-        assert_eq!(Language::from_path(Path::new(&format!("a.{ext}"))), Some(Language::JavaScript));
-    }
-    assert_eq!(hits(Language::Tsx, include_str!("fixtures/slop.tsx")), owned(&[("swallowed-catch", 4)]));
-    assert_eq!(
-        hits(Language::JavaScript, include_str!("fixtures/slop.js")),
-        owned(&[("commented-catch", 4), ("pass-through-wrapper", 9)])
-    );
-}
 
 #[test]
 fn empty_catches_are_errors_commented_ones_warnings() {
     let rules = parse_rules(DEFAULT_RULES).unwrap();
-    let ids = |lang, src: &str| -> Vec<String> { scan(lang, src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
-    let py = |body: &str| format!("try:\n    go()\nexcept E:\n{body}\n");
-    assert_eq!(ids(Language::Python, &py("    pass")), ["swallowed-except"]);
-    assert_eq!(ids(Language::Python, &py("    # deliberate\n    pass")), ["commented-except"]);
-    assert_eq!(ids(Language::Python, &py("    pass  # deliberate")), ["commented-except"]);
-    assert_eq!(ids(Language::TypeScript, "try { go(); } catch { }"), ["swallowed-catch"]);
-    assert_eq!(ids(Language::TypeScript, "try { go(); } catch { /* private window */ }"), ["commented-catch"]);
-    assert_eq!(ids(Language::TypeScript, "try { go(); } catch { /* a */ log(); /* b */ }"), Vec::<String>::new());
+    let ids = |lang, src: &str| -> Vec<String> { scan(lang, Path::new("snippet"), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
+    let try_except = |body: &str| format!("try:\n    print()\nexcept Exception:\n{body}\n");
+    assert_eq!(ids(py(), &try_except("    pass")), ["swallowed-error"]);
+    // A named exception is a decision, not a swallow (benchmark: 3 of 6 false positives).
+    assert_eq!(ids(py(), "try:\n    print()\nexcept KeyError:\n    pass\n"), Vec::<String>::new());
+    assert_eq!(ids(py(), &try_except("    # deliberate\n    pass")), ["commented-error"]);
+    assert_eq!(ids(py(), &try_except("    pass  # deliberate")), ["commented-error"]);
+    assert_eq!(ids(ts(), "try { go(); } catch { }"), ["swallowed-error"]);
+    assert_eq!(ids(ts(), "try { go(); } catch { /* private window */ }"), ["commented-error"]);
+    assert_eq!(ids(ts(), "try { go(); } catch { /* a */ log(); /* b */ }"), Vec::<String>::new());
 }
 
+/// Every registered language must ship `fixtures/<name>/slop.<ext>` with a `slop.expect`
+/// (one `LINE RULE` per finding) and a `clean.<ext>` with no findings.
 #[test]
-fn clean_fixtures_pass() {
-    assert_eq!(hits(Language::TypeScript, include_str!("fixtures/clean.ts")), vec![]);
-    assert_eq!(hits(Language::Python, include_str!("fixtures/clean.py")), vec![]);
-    assert_eq!(hits(Language::Rust, include_str!("fixtures/clean.rs")), vec![]);
-    assert_eq!(hits(Language::Go, include_str!("fixtures/clean.go")), vec![]);
+fn every_language_matches_its_fixtures() {
+    let rules = parse_rules(DEFAULT_RULES).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut failures = Vec::new();
+    for lang in Language::all() {
+        let dir = root.join(lang.name());
+        let ext = lang.spec().extensions[0];
+        let read = |f: String| fs::read_to_string(dir.join(&f)).unwrap_or_else(|_| panic!("missing fixtures/{}/{f}", lang.name()));
+        let found = |src: &str| -> Vec<String> {
+            // The bare file name: the real path is under tests/, which would make it a test file.
+            match scan(lang, Path::new(&format!("fixture.{ext}")), src, &rules) {
+                Ok(fs) => fs.iter().map(|f| format!("{} {}", f.line, f.rule_id)).collect(),
+                Err(e) => vec![format!("ERROR {e:#}")],
+            }
+        };
+        let want: Vec<String> = read("slop.expect".into()).lines().map(str::to_string).collect();
+        let got = found(&read(format!("slop.{ext}")));
+        if got != want {
+            failures.push(format!("{}/slop.{ext}\n  want {want:?}\n  got  {got:?}", lang.name()));
+        }
+        let got = found(&read(format!("clean.{ext}")));
+        if !got.is_empty() {
+            failures.push(format!("{}/clean.{ext}\n  got  {got:?}", lang.name()));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
 #[test]
 fn fixes_unwrap_null_checks_and_delete_restating_comments() {
-    let src = include_str!("fixtures/slop.py");
+    let src = include_str!("fixtures/python/slop.py");
     let rules = parse_rules(DEFAULT_RULES).unwrap();
-    let findings = scan(Language::Python, src, &rules).unwrap();
+    let findings = scan(py(), Path::new("snippet.py"), src, &rules).unwrap();
     let edits: Vec<_> = findings.iter().filter_map(|f| f.fix.as_ref()).collect();
     assert_eq!(edits.len(), 2);
     let fixed = apply_fixes(src, &edits);
     assert!(fixed.contains("    items = []\n    items.append(1)\n    return items\n"), "{fixed}");
     assert!(fixed.contains("    def grow(self):\n        self.age += 1\n"), "{fixed}");
-    ast::parse(Language::Python, &fixed).unwrap();
+    ast::parse(py(), &fixed).unwrap();
 
-    let src = include_str!("fixtures/slop.go");
-    let findings = scan(Language::Go, src, &rules).unwrap();
+    let src = include_str!("fixtures/go/slop.go");
+    let findings = scan(go(), Path::new("snippet.go"), src, &rules).unwrap();
     let edits: Vec<_> = findings.iter().filter_map(|f| f.fix.as_ref()).collect();
     let fixed = apply_fixes(src, &edits);
     assert!(fixed.contains("\ts := &Store{}\n\ts.init()\n\treturn s\n"), "{fixed}");
@@ -140,7 +96,7 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     .unwrap();
     fs::write(
         dir.join("b.ts"),
-        "export function weightOf(parcels: Parcel[]): number {\n  let acc = 0;\n  for (const p of parcels) {\n    if (p.mass > 0) {\n      acc += p.mass * p.count;\n    }\n  }\n  return acc;\n}\n\nexport function names(xs: { name: string }[]): string {\n  return xs.map((x) => x.name.trim()).join(', ');\n}\n",
+        "export function totalPrices(items: Item[]): number {\n  let total = 0;\n  for (const item of items) {\n    if (item.price > 0) {\n      total += item.price * item.qty;\n    }\n  }\n  return total;\n}\n\n// Same shape, different names: small functions like this are not copies.\nexport function weightOf(parcels: Parcel[]): number {\n  let acc = 0;\n  for (const p of parcels) {\n    if (p.mass > 0) {\n      acc += p.mass * p.count;\n    }\n  }\n  return acc;\n}\n\nexport function names(xs: { name: string }[]): string {\n  return xs.map((x) => x.name.trim()).join(', ');\n}\n",
     )
     .unwrap();
     fs::write(
@@ -153,14 +109,23 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     // Same body shape, different data: not a copy. Same signature, stub body: not a copy.
     fs::write(
         dir.join("not_copies.py"),
-        "def test_interpolates():\n    assert sim_time(5, [(0, 100.0), (10, 200.0)]) == 150.0\n\n\ndef test_holds():\n    assert sim_time(20, [(0, 100.0), (10, 200.0)]) == 200.0\n\n\nclass Api(Protocol):\n    def messages(self, endpoint: str) -> list[dict[str, Any]]: ...\n    def patients(self, endpoint: str) -> list[dict[str, Any]]: ...\n",
+        "from timing import Any, Protocol, sim_time\n\n\ndef test_interpolates():\n    assert sim_time(5, [(0, 100.0), (10, 200.0)]) == 150.0\n\n\ndef test_holds():\n    assert sim_time(20, [(0, 100.0), (10, 200.0)]) == 200.0\n\n\nclass Api(Protocol):\n    def messages(self, endpoint: str) -> list[dict[str, Any]]: ...\n    def patients(self, endpoint: str) -> list[dict[str, Any]]: ...\n",
     )
     .unwrap();
+    fs::write(dir.join("broken.py"), "ML unit tests.\n").unwrap();
+    fs::write(dir.join("bundle.js"), format!("var a=1;{}\n", "f(a);".repeat(100))).unwrap();
     fs::write(dir.join(".montiignore"), "ignored/\n").unwrap();
     fs::create_dir(dir.join("ignored")).unwrap();
     fs::write(dir.join("ignored/x.py"), "def (:\n").unwrap();
 
-    let reports = scan_path(&dir, &parse_rules(DEFAULT_RULES).unwrap()).unwrap();
+    let scan = scan_path(&dir, &parse_rules(DEFAULT_RULES).unwrap()).unwrap();
+    let skipped: Vec<(String, String)> =
+        scan.skipped.iter().map(|s| (s.path.file_name().unwrap().to_string_lossy().into(), s.reason.clone())).collect();
+    assert_eq!(
+        skipped,
+        [("broken.py".into(), "python syntax error at 1:1".into()), ("bundle.js".into(), "minified".into())]
+    );
+    let reports = scan.files;
     let got: Vec<(String, String, usize)> = reports
         .iter()
         .flat_map(|r| {
@@ -179,13 +144,13 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     .map(|(a, b, c)| (a.to_string(), b.to_string(), *c))
     .collect();
     assert_eq!(got, want);
-    assert!(reports[0].findings[0].message.contains("100% match with `weightOf`"));
+    assert!(reports[0].findings[0].message.contains("100% match with `totalPrices`"), "{}", reports[0].findings[0].message);
 }
 
 #[test]
 fn file_metrics() {
     let src = "def f(x):\n    # why\n    return x  # trailing\n    # type: ignore\n";
-    let tree = ast::parse(Language::Python, src).unwrap();
+    let tree = ast::parse(py(), src).unwrap();
     let m = metrics::measure(tree.root_node(), src);
     // own-line "# why" only: trailing comments annotate code, directives are for tools
     assert_eq!((m.code_lines, m.comment_lines, m.comment_count), (2, 1, 2));
@@ -194,21 +159,64 @@ fn file_metrics() {
 
 #[test]
 fn syntax_errors_fail() {
-    assert!(ast::parse(Language::Python, "def (:\n").is_err());
+    assert!(ast::parse(py(), "def (:\n").is_err());
+}
+
+#[test]
+fn monti_ignore_comments_silence_findings() {
+    let rules = parse_rules(DEFAULT_RULES).unwrap();
+    let ids = |src: &str| -> Vec<String> { scan(py(), Path::new("snippet.py"), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
+    let swallow = |marker: &str| format!("try:\n    print()\nexcept Exception:  {marker}\n    pass\n");
+    assert_eq!(ids(&swallow("")), ["swallowed-error"]);
+    assert_eq!(ids(&swallow("# monti-ignore")), Vec::<String>::new());
+    assert_eq!(ids(&swallow("# monti-ignore: swallowed-error")), Vec::<String>::new());
+    assert_eq!(ids(&swallow("# monti-ignore: comment-flood")), ["swallowed-error"]);
+}
+
+#[test]
+fn aggressive_fixes_inline_private_wrappers_and_merge_copies() {
+    let dir = temp_dir("aggressive");
+    let main = "import fhir\n\n\ndef _decode(content):\n    return fhir.decode(content)\n\n\ndef public_decode(content):\n    return fhir.decode(content)\n\n\ndef _with_default(a, b=1):\n    return fhir.pair(a, b)\n\n\ndef _total(xs):\n    t = 0\n    for x in xs:\n        if x > 0:\n            t += x * 2\n    return t\n\n\ndef _sum_pos(xs):\n    t = 0\n    for x in xs:\n        if x > 0:\n            t += x * 2\n    return t\n\n\ndef load(raw, xs):\n    return _decode(raw), _decode(raw), _with_default(raw), _total(xs), _sum_pos(xs)\n";
+    fs::write(dir.join("main.py"), main).unwrap();
+    fs::write(dir.join("api.ts"), "export function wrap(a: string) {\n  return send(a);\n}\n").unwrap();
+    let scan = scan_path(&dir, &parse_rules(DEFAULT_RULES).unwrap()).unwrap();
+    let fixes_in = |name: &str| -> Vec<(String, monti_core::Fix)> {
+        let r = scan.files.iter().find(|r| r.path.ends_with(name)).unwrap();
+        r.findings.iter().filter_map(|f| f.fix.clone().map(|x| (f.rule_id.clone(), x))).collect()
+    };
+    let main_fixes = fixes_in("main.py");
+    let rules: Vec<&str> = main_fixes.iter().map(|(r, _)| r.as_str()).collect();
+    assert_eq!(rules, ["pass-through-wrapper", "duplicate-function"], "public_decode, _with_default get none");
+    assert!(main_fixes.iter().all(|(_, f)| f.level == monti_core::FixLevel::Aggressive));
+    assert!(fixes_in("api.ts").is_empty(), "exported wrapper must not be inlined");
+
+    let fixed = apply_fixes(main, &main_fixes.iter().map(|(_, f)| f).collect::<Vec<_>>());
+    assert!(!fixed.contains("def _decode") && !fixed.contains(" _decode(") && !fixed.contains("_sum_pos"), "{fixed}");
+    assert!(fixed.contains("    return fhir.decode(raw), fhir.decode(raw), _with_default(raw), _total(xs), _total(xs)\n"), "{fixed}");
+    assert!(fixed.contains("def public_decode(content):"), "{fixed}");
+    ast::parse(py(), &fixed).unwrap();
 }
 
 #[test]
 fn bad_rules_fail_at_load() {
     let rule = |body: &str| format!("[rules.x]\nseverity = \"error\"\nmessage = \"m\"\n{body}");
-    for body in [
-        "languages = [\"python\"]\ntree_sitter_query = \"(no_such_node) @n\"",
-        "languages = [\"python\"]\ntree_sitter_query = \"(pass_statement) @n\"\nmax_comment_code_ratio = 0.5",
-        "languages = [\"cobol\"]\nmax_comment_code_ratio = 0.5",
-        "languages = [\"rust\"]\ncheck = \"redundant-null-check\"",
-        "languages = [\"go\"]\ncheck = \"duplicate-function\"",
-        "languages = [\"go\"]\ncheck = \"restating-comment\"\nmin_similarity = 0.5",
-        "languages = [\"go\"]\ncheck = \"no-such-check\"",
+    // Control: the shared header is valid, so each case below fails for its own reason.
+    parse_rules(&rule("queries = { python = \"(pass_statement) @n\" }")).unwrap();
+    parse_rules(&rule("languages = [\"*\"]\ncheck = \"restating-comment\"")).unwrap();
+    for (body, reason) in [
+        ("queries = { python = \"(no_such_node) @n\" }", "invalid query"),
+        ("queries = { python = \"(pass_statement)\" }", "no capture"),
+        ("queries = { cobol = \"(x) @n\" }", "unknown language"),
+        ("queries = { python = \"(pass_statement) @n\" }\nlanguages = [\"python\"]", "drop `languages`"),
+        ("queries = { python = \"(pass_statement) @n\" }\nmax_comment_code_ratio = 0.5", "exactly one"),
+        ("languages = [\"cobol\"]\nmax_comment_code_ratio = 0.5", "unknown language"),
+        ("max_comment_code_ratio = 0.5", "needs `languages`"),
+        ("languages = [\"rust\"]\ncheck = \"redundant-null-check\"", "does not support"),
+        ("languages = [\"go\"]\ncheck = \"duplicate-function\"", "needs `min_similarity`"),
+        ("languages = [\"go\"]\ncheck = \"restating-comment\"\nmin_similarity = 0.5", "only applies"),
+        ("languages = [\"go\"]\ncheck = \"no-such-check\"", "unknown variant"),
     ] {
-        assert!(parse_rules(&rule(body)).is_err(), "accepted: {body}");
+        let err = format!("{:#}", parse_rules(&rule(body)).expect_err(body));
+        assert!(err.contains(reason), "{body}\n  wanted `{reason}`, got: {err}");
     }
 }

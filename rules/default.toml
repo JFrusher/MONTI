@@ -1,66 +1,171 @@
 # MONTI rules. The table key is the rule id. Each rule sets exactly one of:
-#   tree_sitter_query       findings point at the earliest capture
-#   max_comment_code_ratio  per function
-#   check                   built-in detector (see README)
+#   queries                 one Tree-sitter query per language; findings point at the earliest capture
+#   max_comment_code_ratio  per function, with `languages`
+#   check                   built-in detector (see README), with `languages`
+# `languages = ["*"]` means every language the check supports.
+# Optional on any rule: `skip_tests = true` (not applied to test files), `unless_comment_explains =
+# true` (dropped when a comment in the flagged code gives a reason, not just "ignore").
 
-[rules.swallowed-catch]
+[rules.swallowed-error]
 severity = "error"
-message = "Empty catch block. Swallowing exceptions without handling is AI defensive slop."
-languages = ["typescript", "tsx", "javascript"]
-tree_sitter_query = '''
+message = "Error handler is empty and catches everything: the error is swallowed. Handle it, log it, or let it propagate."
+
+[rules.swallowed-error.queries]
+cpp = '''
+(catch_clause
+  parameters: (parameter_list) @params
+  body: (compound_statement) @block
+  (#eq? @params "(...)")
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+csharp = '''
+(catch_clause
+  body: (block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+dart = '''
+(try_statement
+  (catch_clause) . (block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+go = '''
+(if_statement
+  condition: (binary_expression left: (identifier) @err right: (nil))
+  consequence: (block) @block
+  (#eq? @err "err")
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+java = '''
+(catch_clause
+  body: (block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+javascript = '''
+(catch_clause
+  body: (statement_block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+kotlin = '''
+(catch_block
+  (block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+matlab = '''
+((catch_clause) @block
+  (#match? @block "^catch[^\\n%]*\\s*$"))
+'''
+php = '''
+(catch_clause
+  body: (compound_statement) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+python = '''
+((except_clause (block . (pass_statement) .) @block) @clause
+  (#match? @clause "^except\\s*(\\(?\\s*(Exception|BaseException)\\s*\\)?)?(\\s+as\\s+\\w+)?\\s*:")
+  (#not-match? @clause "#"))
+'''
+ruby = '''
+((rescue) @block
+  (#match? @block "^rescue[^\\n#]*$"))
+'''
+rust = '''
+(match_arm
+  pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
+  value: (block) @block
+  (#eq? @variant "Err")
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+scala = '''
+(catch_clause (case_block (case_clause !body)) @block
+  (#not-match? @block "//|/\\*"))
+'''
+swift = '''
+((catch_block) @block
+  (#match? @block "^catch[^{]*\\{\\s*\\}$"))
+'''
+tsx = '''
+(catch_clause
+  body: (statement_block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+typescript = '''
 (catch_clause
   body: (statement_block) @block
   (#match? @block "^\\{\\s*\\}$"))
 '''
 
-[rules.commented-catch]
+[rules.commented-error]
 severity = "warning"
-message = "Catch block holds only comments. Check the swallow is deliberate."
-languages = ["typescript", "tsx", "javascript"]
-tree_sitter_query = '''
+message = "Error handler holds only comments. Check that swallowing the error is deliberate."
+unless_comment_explains = true
+
+[rules.commented-error.queries]
+cpp = '''
+(catch_clause
+  body: (compound_statement) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+csharp = '''
+(catch_clause
+  body: (block) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+dart = '''
+(try_statement
+  (catch_clause) . (block) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+go = '''
+(if_statement
+  condition: (binary_expression left: (identifier) @err right: (nil))
+  consequence: (block) @block
+  (#eq? @err "err")
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+java = '''
+(catch_clause
+  body: (block) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+javascript = '''
 (catch_clause
   body: (statement_block) @block
   (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
   (#not-match? @block "^\\{\\s*\\}$"))
 '''
-
-[rules.swallowed-except]
-severity = "error"
-message = "`except` body is a bare `pass`. Swallowing exceptions without handling is AI defensive slop."
-languages = ["python"]
-tree_sitter_query = '''
-((except_clause
-  (block . (pass_statement) .) @block) @clause
-  (#not-match? @clause "#"))
+kotlin = '''
+(catch_block
+  (block) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
 '''
-
-[rules.commented-except]
-severity = "warning"
-message = "`except` only passes with a comment. Check the swallow is deliberate."
-languages = ["python"]
-tree_sitter_query = '''
+matlab = '''
+((catch_clause) @block
+  (#match? @block "^catch[^\\n%]*(\\s|%[^\\n]*)*$")
+  (#match? @block "%"))
+'''
+php = '''
+(catch_clause
+  body: (compound_statement) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+python = '''
 ((except_clause (block) @block) @clause
   (#match? @block "^(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$")
   (#match? @clause "#"))
 '''
-
-[rules.swallowed-err-arm]
-severity = "error"
-message = "`Err(_) => {}` discards the error."
-languages = ["rust"]
-tree_sitter_query = '''
-(match_arm
-  pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
-  value: (block) @block
-  (#eq? @variant "Err")
-  (#match? @block "^\\{\\s*\\}$"))
+ruby = '''
+((rescue) @block
+  (#match? @block "^rescue[^\\n#]*(\\s|#[^\\n]*)*$")
+  (#match? @block "#"))
 '''
-
-[rules.commented-err-arm]
-severity = "warning"
-message = "`Err(_)` arm holds only comments. Check the discard is deliberate."
-languages = ["rust"]
-tree_sitter_query = '''
+rust = '''
 (match_arm
   pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
   value: (block) @block
@@ -68,65 +173,131 @@ tree_sitter_query = '''
   (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
   (#not-match? @block "^\\{\\s*\\}$"))
 '''
-
-[rules.swallowed-err-check]
-severity = "error"
-message = "`if err != nil {}` checks the error and then ignores it."
-languages = ["go"]
-tree_sitter_query = '''
-(if_statement
-  condition: (binary_expression left: (identifier) @err right: (nil))
-  consequence: (block) @block
-  (#eq? @err "err")
-  (#match? @block "^\\{\\s*\\}$"))
+scala = '''
+(catch_clause (case_block (case_clause !body)) @block
+  (#match? @block "//|/\\*"))
 '''
-
-[rules.commented-err-check]
-severity = "warning"
-message = "`if err != nil` holds only comments. Check the discard is deliberate."
-languages = ["go"]
-tree_sitter_query = '''
-(if_statement
-  condition: (binary_expression left: (identifier) @err right: (nil))
-  consequence: (block) @block
-  (#eq? @err "err")
+swift = '''
+((catch_block) @block
+  (#match? @block "^catch[^{]*\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^catch[^{]*\\{\\s*\\}$"))
+'''
+tsx = '''
+(catch_clause
+  body: (statement_block) @block
   (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
   (#not-match? @block "^\\{\\s*\\}$"))
 '''
+typescript = '''
+(catch_clause
+  body: (statement_block) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
+'''
+
+[rules.discarded-error]
+severity = "warning"
+message = "The error result is thrown away. Check it or let it propagate."
+
+[rules.discarded-error.queries]
+bash = '''
+(list (command) "||" (command name: (command_name (word) @w)) @ignored
+  (#any-of? @w "true" ":"))
+'''
+lua = '''
+(block (function_call name: (identifier) @f) @call
+  (#any-of? @f "pcall" "xpcall"))
+(chunk (function_call name: (identifier) @f) @call
+  (#any-of? @f "pcall" "xpcall"))
+'''
+
+[rules.type-escape]
+severity = "warning"
+message = "Type or lint check silenced without naming what. Fix the type, or name the specific code."
+skip_tests = true
+
+[rules.type-escape.queries]
+python = '''
+((comment) @c
+  (#match? @c "(type:\\s*ignore|noqa)\\s*$"))
+'''
+typescript = '''
+((predefined_type) @t (#eq? @t "any"))
+((comment) @c
+  (#match? @c "@ts-(ignore|nocheck)|eslint-disable(-next-line|-line)?\\s*(\\*/)?$"))
+'''
+tsx = '''
+((predefined_type) @t (#eq? @t "any"))
+((comment) @c
+  (#match? @c "@ts-(ignore|nocheck)|eslint-disable(-next-line|-line)?\\s*(\\*/)?$"))
+'''
+javascript = '''
+((comment) @c
+  (#match? @c "eslint-disable(-next-line|-line)?\\s*(\\*/)?$"))
+'''
+
+[rules.broad-except]
+severity = "warning"
+message = "Catches every exception without reporting or re-raising it. Catch the specific error you expect."
+
+[rules.broad-except.queries]
+python = '''
+((except_clause) @clause
+  (#match? @clause "^except\\s*:")
+  (#not-match? @clause "\\braise\\b")
+  (#not-match? @clause "^[^:]*:(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$"))
+((except_clause) @clause
+  (#match? @clause "^except\\s+\\(?\\s*(Exception|BaseException)\\s*\\)?\\s*:")
+  (#not-match? @clause "\\b(raise|log\\w*|logger|logging|traceback|warn\\w*)\\b")
+  (#not-match? @clause "^[^:]*:(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$"))
+'''
+
+[rules.undefined-name]
+severity = "error"
+message = "Called name is never defined, imported, or a builtin; likely hallucinated."
+languages = ["*"]
+check = "undefined-name"
+
+[rules.unused-parameter]
+severity = "warning"
+message = "Parameter is never used."
+skip_tests = true
+languages = ["*"]
+check = "unused-parameter"
 
 [rules.comment-flood]
 severity = "warning"
 message = "Comment-to-code ratio too high; comments likely restate the code."
-languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
+languages = ["*"]
 max_comment_code_ratio = 0.35
 
 [rules.restating-comment]
 severity = "warning"
 message = "Comment restates the code below it."
-languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
+languages = ["*"]
 check = "restating-comment"
 
 [rules.pass-through-wrapper]
 severity = "warning"
 message = "Function only forwards its parameters to another call; call the target directly."
-languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
+languages = ["*"]
 check = "pass-through-wrapper"
 
 [rules.redundant-null-check]
 severity = "warning"
 message = "Null check on a value that was just assigned a non-null value."
-languages = ["typescript", "tsx", "javascript", "python", "go"]
+languages = ["*"]
 check = "redundant-null-check"
 
 [rules.duplicate-function]
 severity = "warning"
 message = "Structurally duplicates another function; reuse it."
-languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
+languages = ["*"]
 check = "duplicate-function"
 min_similarity = 0.85
 
 [rules.ghost-abstraction]
 severity = "warning"
 message = "Abstraction has a single implementor and at most one use; inline it."
-languages = ["typescript", "tsx", "python", "rust"]
+languages = ["*"]
 check = "ghost-abstraction"

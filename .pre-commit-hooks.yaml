@@ -1,0 +1,7 @@
+- id: monti
+  name: monti
+  description: Block new LLM slop in the changes being committed.
+  # Needs `monti` on PATH (see README: Install).
+  entry: monti scan --since HEAD
+  language: system
+  pass_filenames: false

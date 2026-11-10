@@ -1,14 +1,18 @@
 //! Per-file detectors a Tree-sitter query cannot express.
 
-use crate::Edit;
-use crate::ast::{Language, descendants, is_comment, is_directive, last_row};
+use crate::index::{NAME_KINDS, fn_name};
+use crate::{Edit, Fix, FixLevel};
+use crate::ast::{Language, descendants, is_comment, is_directive, last_row, looks_like_code, words};
+use crate::languages::NullCheck;
 use crate::metrics::functions;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 
 pub struct Hit<'t> {
     pub node: Node<'t>,
-    pub fix: Option<Edit>,
+    pub fix: Option<Fix>,
+    /// Appended to the rule message, e.g. which name.
+    pub note: Option<String>,
 }
 
 fn text<'s>(n: Node, src: &'s str) -> &'s str {
@@ -24,50 +28,120 @@ fn named(n: Node) -> Vec<Node> {
 // ---- pass-through wrappers -------------------------------------------------
 
 /// Free functions whose whole body is one call forwarding exactly their parameters, in order.
+/// Aggressive fix: call the target directly and delete the wrapper (see [`inline_wrapper`]).
 pub fn pass_through_wrappers<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
     functions(lang, root)
         .into_iter()
-        .filter(|f| !is_method(*f) && !is_callback(*f) && is_pass_through(lang, *f, src))
-        .map(|node| Hit { node, fix: None })
+        .filter(|f| !is_method(lang, *f) && !is_callback(*f) && !is_decorated(*f) && is_pass_through(lang, *f, src))
+        .map(|node| Hit { node, fix: inline_wrapper(lang, root, node, src), note: None })
         .collect()
 }
 
+/// Replaces every call of a private wrapper with its target and deletes it, when the wrapper is
+/// only ever called directly, has no defaults, and its target is not tied to `this`/`self`.
+fn inline_wrapper(lang: Language, root: Node, f: Node, src: &str) -> Option<Fix> {
+    let call = f.child_by_field_name("body").and_then(|b| single_call(lang, b))?;
+    let target = text(call.child_by_field_name("function")?, src);
+    let params = parameter_list(f)?;
+    if target.contains("this") || target.contains("self") || text(params, src).contains('=') {
+        return None;
+    }
+    let mut renames = calls_only(lang, root, f, src)?;
+    renames.iter_mut().for_each(|e| e.replacement = target.to_string());
+    Some(delete_function(f, src, renames, fn_name(f, src)))
+}
+
+/// Edits renaming every in-file use of `f`'s name (replacement left empty for the caller), or
+/// `None` unless `f` is private, top-level, and every other occurrence of its name is a direct call.
+pub(crate) fn calls_only(lang: Language, root: Node, f: Node, src: &str) -> Option<Vec<Edit>> {
+    let private = lang.spec().private?;
+    let name_node = f.child_by_field_name("name")?;
+    let top_level = f.parent().is_some_and(|p| p == root || p.parent() == Some(root));
+    if !private(f, src) || !top_level {
+        return None;
+    }
+    let name = text(name_node, src);
+    let mut edits = Vec::new();
+    for n in descendants(root).into_iter().filter(|n| NAME_KINDS.contains(&n.kind()) && text(*n, src) == name) {
+        if n == name_node {
+            continue;
+        }
+        let callee = n.parent().is_some_and(|p| lang.spec().calls.contains(&p.kind()) && p.child_by_field_name("function") == Some(n));
+        if !callee {
+            return None;
+        }
+        edits.push(Edit { start: n.start_byte(), end: n.end_byte(), replacement: String::new() });
+    }
+    Some(edits)
+}
+
+/// An aggressive fix deleting function `f` (whole lines) plus `others`, valid only while `name`
+/// occurs nowhere outside this file.
+pub(crate) fn delete_function(f: Node, src: &str, mut others: Vec<Edit>, name: String) -> Fix {
+    let uses = others.len() + 1;
+    others.push(delete_lines(f, f, src));
+    Fix { level: FixLevel::Aggressive, edits: others, requires_local: vec![(name, uses)] }
+}
+
 /// Methods may delegate to satisfy an interface or act as a facade.
-fn is_method(f: Node) -> bool {
-    if matches!(f.kind(), "method_definition" | "method_declaration") {
+fn is_method(lang: Language, f: Node) -> bool {
+    let spec = lang.spec();
+    // C++ `double& Cycle_Model::rate(...) { ... }`: a method defined outside its class. Follow only
+    // the name chain (reference -> function -> name): parameter types like `std::string` are
+    // qualified too.
+    let mut qualified = false;
+    let mut d = f.child_by_field_name("declarator");
+    while let Some(n) = d {
+        qualified |= n.kind() == "qualified_identifier";
+        d = n.child_by_field_name("declarator");
+    }
+    if spec.methods.contains(&f.kind()) || qualified {
         return true;
     }
     let mut parent = f.parent();
     if parent.is_some_and(|p| p.kind() == "decorated_definition") {
         parent = parent.and_then(|p| p.parent());
     }
-    parent
-        .filter(|p| matches!(p.kind(), "block" | "declaration_list"))
-        .and_then(|p| p.parent())
-        .is_some_and(|c| matches!(c.kind(), "class_definition" | "impl_item" | "trait_item"))
+    let grandparent = parent.and_then(|p| p.parent());
+    [parent, grandparent].into_iter().flatten().any(|n| spec.classes.contains(&n.kind()))
 }
 
 /// A callback also pins the arity: `Array.from(xs, b => f(b))` is not `Array.from(xs, f)`,
-/// because `Array.from` passes the index too.
+/// because `Array.from` passes the index too. An object/dict property value implements an
+/// interface or a config slot (`beforeSend: (e) => scrub(e)`), which pins its signature the same way.
 fn is_callback(f: Node) -> bool {
-    f.parent().is_some_and(|p| matches!(p.kind(), "arguments" | "argument_list"))
+    f.parent().is_some_and(|p| matches!(p.kind(), "arguments" | "argument_list" | "argument" | "pair"))
+}
+
+/// Decorators register functions (routes, tests, fixtures) under a signature they impose.
+fn is_decorated(f: Node) -> bool {
+    f.parent().is_some_and(|p| p.kind() == "decorated_definition")
 }
 
 fn is_pass_through(lang: Language, func: Node, src: &str) -> bool {
-    let Some(params) = param_names(lang, func, src) else { return false };
-    // A zero-argument forwarder is usually an entry point or thunk, not a wrapper.
-    if params.is_empty() {
+    let Some(params) = param_names(func, src) else { return false };
+    // A zero-argument forwarder is usually an entry point or thunk, not a wrapper; one that adds
+    // defaults (`trace(path, seed=7)`) changes how the target is called.
+    if params.is_empty() || has_defaults(func) {
         return false;
     }
-    let Some(call) = func.child_by_field_name("body").and_then(single_call) else { return false };
+    let Some(call) = func.child_by_field_name("body").and_then(|b| single_call(lang, b)) else { return false };
     let Some(args) = call.child_by_field_name("arguments") else { return false };
+    // `(d) => fmt.format(d)` keeps `this` bound in JavaScript; `fmt.format` alone would not.
+    let member_target = call.child_by_field_name("function").is_some_and(|t| t.child_by_field_name("object").is_some());
+    if lang.spec().receiver_lost && member_target {
+        return false;
+    }
     named(args).into_iter().map(|a| text(a, src)).eq(params)
 }
 
-fn single_call(mut n: Node) -> Option<Node> {
+fn single_call(lang: Language, mut n: Node) -> Option<Node> {
     const WRAPPERS: &[&str] = &[
         "statement_block",
+        "compound_statement",
         "block",
+        "body_statement",
+        "function_body",
         "statement_list",
         "return_statement",
         "return_expression",
@@ -78,12 +152,35 @@ fn single_call(mut n: Node) -> Option<Node> {
         let &[only] = named(n).as_slice() else { return None };
         n = only;
     }
-    matches!(n.kind(), "call_expression" | "call").then_some(n)
+    lang.spec().calls.contains(&n.kind()).then_some(n)
+}
+
+/// The parameter list: on the function itself, or (C, C++, Dart) on its declarator or signature.
+pub(crate) fn parameter_list(func: Node) -> Option<Node> {
+    if let Some(p) = func.child_by_field_name("parameters").or_else(|| func.child_by_field_name("parameter")) {
+        return Some(p);
+    }
+    let mut n = func.child_by_field_name("declarator").or_else(|| func.child_by_field_name("signature"))?;
+    for _ in 0..3 {
+        if let Some(p) = n.child_by_field_name("parameters") {
+            return Some(p);
+        }
+        n = *named(n).first()?;
+    }
+    None
+}
+
+fn has_defaults(func: Node) -> bool {
+    parameter_list(func).is_some_and(|list| {
+        named(list).iter().any(|p| {
+            p.kind().contains("default") || p.kind().contains("optional") || p.child_by_field_name("value").is_some()
+        })
+    })
 }
 
 /// Parameter names in order, receivers (`self`, `cls`, Rust `&self`) dropped. `None` for shapes we do not model.
-fn param_names<'s>(lang: Language, func: Node, src: &'s str) -> Option<Vec<&'s str>> {
-    let list = func.child_by_field_name("parameters").or_else(|| func.child_by_field_name("parameter"))?;
+fn param_names<'s>(func: Node, src: &'s str) -> Option<Vec<&'s str>> {
+    let list = parameter_list(func)?;
     if list.kind() == "identifier" {
         return Some(vec![text(list, src)]);
     }
@@ -92,18 +189,24 @@ fn param_names<'s>(lang: Language, func: Node, src: &'s str) -> Option<Vec<&'s s
         match p.kind() {
             "self_parameter" => {}
             "identifier" | "list_splat_pattern" | "dictionary_splat_pattern" => names.push(text(p, src)),
-            "parameter_declaration" => {
-                let mut cursor = p.walk();
-                names.extend(p.children_by_field_name("name", &mut cursor).map(|n| text(n, src)));
-            }
             "typed_parameter" => names.push(text(*named(p).first()?, src)),
             _ => {
-                let name = p.child_by_field_name("pattern").or_else(|| p.child_by_field_name("name"))?;
+                let mut cursor = p.walk();
+                let multi: Vec<Node> = p.children_by_field_name("name", &mut cursor).collect();
+                if multi.len() > 1 {
+                    // Go: `a, b int`
+                    names.extend(multi.iter().map(|n| text(*n, src)));
+                    continue;
+                }
+                let name = p
+                    .child_by_field_name("pattern")
+                    .or_else(|| p.child_by_field_name("name"))
+                    .or_else(|| p.child_by_field_name("declarator").filter(|d| d.kind() == "identifier"))?;
                 names.push(text(name, src));
             }
         }
     }
-    if lang == Language::Python && matches!(names.first(), Some(&("self" | "cls"))) {
+    if matches!(names.first(), Some(&("self" | "cls"))) {
         names.remove(0);
     }
     Some(names)
@@ -112,8 +215,9 @@ fn param_names<'s>(lang: Language, func: Node, src: &'s str) -> Option<Vec<&'s s
 // ---- redundant null checks -------------------------------------------------
 
 /// `if (x != null)` right after `x` was assigned a value that cannot be null.
-/// Fix (only when there is no `else`): replace the `if` with its dedented body.
+/// Fix (only for a plain `if` without `else`/`elif`/initializer): replace it with its dedented body.
 pub fn redundant_null_checks<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
+    let Some(check) = &lang.spec().null_check else { return Vec::new() };
     let mut hits = Vec::new();
     for node in descendants(root) {
         if node.kind() != "if_statement" {
@@ -121,31 +225,33 @@ pub fn redundant_null_checks<'t>(lang: Language, root: Node<'t>, src: &str) -> V
         }
         let Some((name, value)) = node.prev_named_sibling().and_then(|p| assignment(p, src)) else { continue };
         let Some(cond) = node.child_by_field_name("condition") else { continue };
-        if !non_null(lang, value, src) || !is_null_test(lang, text(cond, src), name) {
+        if !(check.non_null)(value, src) || !is_null_test(check, text(cond, src), name) {
             continue;
         }
-        let fix = match node.child_by_field_name("alternative") {
-            None => unwrap_if(node, src),
-            Some(_) => None,
-        };
-        hits.push(Hit { node, fix });
+        let fix = if named(node).len() == 2 { unwrap_if(node, src).map(|e| Fix::new(FixLevel::Standard, vec![e])) } else { None };
+        hits.push(Hit { node, fix, note: None });
     }
     hits
 }
 
 /// `(name, value)` for a single-variable assignment or declaration statement.
 fn assignment<'t, 's>(stmt: Node<'t>, src: &'s str) -> Option<(&'s str, Node<'t>)> {
+    const DECLARATIONS: &[&str] = &["lexical_declaration", "variable_declaration", "local_variable_declaration", "declaration"];
+    const DECLARATORS: &[&str] = &["variable_declarator", "init_declarator"];
+    const NAMES: &[&str] = &["identifier", "variable_name", "name"];
     let mut n = stmt;
     if n.kind() == "expression_statement" {
         n = *named(n).first()?;
     }
-    if matches!(n.kind(), "lexical_declaration" | "variable_declaration") {
-        let &[decl] = named(n).as_slice() else { return None };
+    if DECLARATIONS.contains(&n.kind()) {
+        let decls: Vec<Node> = named(n).into_iter().filter(|c| DECLARATORS.contains(&c.kind())).collect();
+        let &[decl] = decls.as_slice() else { return None };
         n = decl;
     }
-    let name = single(n.child_by_field_name("name").or_else(|| n.child_by_field_name("left"))?)?;
+    let name = n.child_by_field_name("name").or_else(|| n.child_by_field_name("left")).or_else(|| n.child_by_field_name("declarator"));
+    let name = single(name?)?;
     let value = single(n.child_by_field_name("value").or_else(|| n.child_by_field_name("right"))?)?;
-    (name.kind() == "identifier").then(|| (text(name, src), value))
+    NAMES.contains(&name.kind()).then(|| (text(name, src), value))
 }
 
 /// Unwraps Go's one-element `expression_list`.
@@ -157,42 +263,16 @@ fn single(n: Node) -> Option<Node> {
     Some(only)
 }
 
-fn non_null(lang: Language, v: Node, src: &str) -> bool {
-    match lang {
-        Language::TypeScript | Language::Tsx | Language::JavaScript => matches!(
-            v.kind(),
-            "new_expression" | "object" | "array" | "string" | "template_string" | "number" | "true" | "false"
-                | "arrow_function" | "function_expression"
-        ),
-        Language::Python => matches!(
-            v.kind(),
-            "list" | "dictionary" | "set" | "tuple" | "string" | "integer" | "float" | "true" | "false"
-                | "list_comprehension" | "dictionary_comprehension" | "set_comprehension" | "lambda"
-        ),
-        Language::Go => match v.kind() {
-            "composite_literal" | "func_literal" | "interpreted_string_literal" | "raw_string_literal"
-            | "int_literal" | "float_literal" => true,
-            "unary_expression" => v.child_by_field_name("operand").is_some_and(|o| o.kind() == "composite_literal"),
-            "call_expression" => v.child_by_field_name("function").is_some_and(|f| matches!(text(f, src), "new" | "make")),
-            _ => false,
-        },
-        Language::Rust => false,
-    }
-}
-
-fn is_null_test(lang: Language, cond: &str, name: &str) -> bool {
+fn is_null_test(check: &NullCheck, cond: &str, name: &str) -> bool {
     let c: String = cond.chars().filter(|ch| !ch.is_whitespace() && !matches!(ch, '(' | ')')).collect();
-    let (nulls, ops): (&[&str], &[&str]) = match lang {
-        Language::TypeScript | Language::Tsx | Language::JavaScript => (&["null", "undefined"], &["!=", "!=="]),
-        Language::Python => (&["None"], &["isnot", "!="]),
-        Language::Go => (&["nil"], &["!="]),
-        Language::Rust => (&[], &[]),
-    };
-    nulls.iter().any(|z| ops.iter().any(|op| c == format!("{name}{op}{z}") || c == format!("{z}{op}{name}")))
+    check
+        .nulls
+        .iter()
+        .any(|z| check.ops.iter().any(|op| c == format!("{name}{op}{z}") || c == format!("{z}{op}{name}")))
 }
 
 fn unwrap_if(if_node: Node, src: &str) -> Option<Edit> {
-    let body = if_node.child_by_field_name("consequence")?;
+    let body = if_node.child_by_field_name("consequence").or_else(|| if_node.child_by_field_name("body"))?;
     let mut cursor = body.walk();
     let mut stmts: Vec<Node> = body.named_children(&mut cursor).collect();
     if let &[list] = stmts.as_slice()
@@ -216,10 +296,126 @@ fn unwrap_if(if_node: Node, src: &str) -> Option<Edit> {
     Some(Edit { start: if_node.start_byte(), end: if_node.end_byte(), replacement })
 }
 
+// ---- comment reasons --------------------------------------------------------
+
+/// True when the comments inside `node` explain something: more than a shrug like
+/// `# ignore`, `// silent fail` or `% swallow errors`.
+pub fn comments_explain(node: Node, src: &str) -> bool {
+    const SHRUGS: &[&str] = &["silent", "swallow", "ignor", "nothing", "noop", "pass", "suppress"];
+    let words: Vec<String> =
+        descendants(node).into_iter().filter(|n| is_comment(n.kind())).flat_map(|n| words(text(n, src))).collect();
+    let shrug = words.iter().any(|w| SHRUGS.iter().any(|s| w.starts_with(s)));
+    !(words.len() <= 2 || (words.len() <= 5 && shrug))
+}
+
+// ---- undefined names ------------------------------------------------------
+
+/// Bare calls to a name that appears nowhere else in the file and is not a builtin: in a dynamic
+/// language that is a NameError waiting to happen, typically a hallucinated helper.
+pub fn undefined_names<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
+    let spec = lang.spec();
+    let Some(undefined) = &spec.undefined else { return Vec::new() };
+    let nodes = descendants(root);
+    if nodes.iter().any(|n| n.kind() == undefined.wildcard_import) {
+        return Vec::new();
+    }
+    let mut callees = Vec::new();
+    let mut elsewhere = HashSet::new();
+    for n in nodes.into_iter().filter(|n| n.kind() == "identifier") {
+        let callee = n.parent().is_some_and(|p| spec.calls.contains(&p.kind()) && p.child_by_field_name("function") == Some(n));
+        if callee {
+            callees.push(n);
+        } else {
+            elsewhere.insert(text(n, src));
+        }
+    }
+    callees
+        .into_iter()
+        .filter(|n| !elsewhere.contains(text(*n, src)) && !undefined.builtins.contains(&text(*n, src)))
+        .map(|node| Hit { node, fix: None, note: Some(format!("`{}`", text(node, src))) })
+        .collect()
+}
+
+// ---- unused parameters ------------------------------------------------------
+
+/// Free functions with a parameter the body never mentions. Methods, callbacks and decorated
+/// functions are skipped (their signature is usually imposed), as are stubs, `_`-prefixed names and
+/// splats.
+pub fn unused_parameters<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
+    // A parameter list repeated by other functions in the file marks a family dispatched through
+    // one table (`_check_*(match, segs, expect)`): its signature is imposed, so a member ignoring
+    // one parameter is not slop.
+    let signature = |f: Node| parameter_list(f).map(|l| text(l, src).split_whitespace().collect::<String>());
+    let all = functions(lang, root);
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for f in &all {
+        if let Some(sig) = signature(*f) {
+            *seen.entry(sig).or_default() += 1;
+        }
+    }
+    let mut hits = Vec::new();
+    for f in all {
+        // Three or more: two functions sharing a list is common coincidence (benchmark: both lost
+        // real findings were pairs); dispatch-table families are larger.
+        let shared = signature(f).is_some_and(|sig| seen[&sig] >= 3);
+        if is_method(lang, f) || is_callback(f) || is_decorated(f) || shared {
+            continue;
+        }
+        // Test runners inject parameters by name (pytest fixtures, Go's `t`): a fixture requested
+        // only for its side effect is not unused.
+        if f.child_by_field_name("name").is_some_and(|n| text(n, src).to_lowercase().starts_with("test")) {
+            continue;
+        }
+        let (Some(params), Some(body)) = (param_names(f, src), f.child_by_field_name("body")) else { continue };
+        if is_stub(body) {
+            continue;
+        }
+        // Whole words of the body text, not just identifier nodes: names used inside format strings
+        // (`format!("{name}")`) and interpolations are not identifiers in every grammar.
+        let used: HashSet<&str> = text(body, src).split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+        // Plain names only (`x`, PHP `$x`, Rust `mut x`); destructuring patterns and splats are skipped.
+        let unused: Vec<String> = params
+            .iter()
+            .map(|p| p.trim_start_matches('$').trim_start_matches("mut "))
+            .filter(|p| p.chars().all(|c| c.is_alphanumeric() || c == '_'))
+            .filter(|name| !name.is_empty() && !name.starts_with('_') && !used.contains(name))
+            .map(|name| format!("`{name}`"))
+            .collect();
+        if !unused.is_empty() {
+            hits.push(Hit { node: f, fix: None, note: Some(unused.join(", ")) });
+        }
+    }
+    hits
+}
+
+/// A body that only declares the signature: `...`, `pass`, `raise NotImplementedError`, or nothing.
+fn is_stub(body: Node) -> bool {
+    match named(body).as_slice() {
+        [] => true,
+        [only] => {
+            matches!(only.kind(), "pass_statement" | "ellipsis" | "raise_statement")
+                || (only.kind() == "expression_statement" && named(*only).first().is_some_and(|e| e.kind() == "ellipsis"))
+        }
+        _ => false,
+    }
+}
+
 // ---- restating comments ----------------------------------------------------
 
-/// Notes and doc comments are never "restating", whatever their words.
-const KEEP_MARKERS: &[&str] = &["TODO", "FIXME", "HACK", "SAFETY", "NOTE", "///", "//!", "/**"];
+/// Notes and doc comments (incl. Sphinx `#:`) are never "restating", whatever their words.
+const KEEP_MARKERS: &[&str] = &["TODO", "FIXME", "HACK", "SAFETY", "NOTE", "///", "//!", "/**", "#:"];
+
+/// Words a restating comment may add to the code's own names ("set the age to 20").
+const FILLER: &[&str] = &[
+    "a", "an", "the", "to", "of", "for", "and", "or", "in", "on", "at", "by", "with", "from", "into", "is", "are",
+    "be", "it", "this", "that", "we", "our", "set", "sets", "get", "gets", "create", "creates", "make", "makes",
+    "call", "calls", "update", "updates", "increment", "increments", "decrement", "initialize", "initialise", "init",
+    "add", "adds", "append", "remove", "delete", "return", "returns", "new", "check", "checks", "value", "variable",
+    "then", "now", "here", "next", "first", "finally", "do", "run", "start", "stop", "save", "load", "read", "write",
+    "print", "show", "plot", "draw", "compute", "calculate", "define", "declare", "assign", "store", "prepare",
+    "handle", "process", "open", "close", "use", "loop", "over", "each", "all", "current",
+];
+
 
 /// An own-line comment block whose words cover every identifier of the statement right below it,
 /// e.g. `// Set age to 20` above `this.age = 20`. Fix: delete the comment lines.
@@ -229,7 +425,14 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
         if !is_comment(last.kind()) || !own_line(last) {
             continue;
         }
-        let Some(target) = last.next_named_sibling() else { continue };
+        let Some(mut target) = last.next_named_sibling() else { continue };
+        // Some grammars (Python) hang a comment before a block's first statement outside the
+        // block: the statement below is the block's first child, not the whole block.
+        while matches!(target.kind(), "block" | "body" | "statement_block" | "compound_statement" | "statement_list")
+            && let Some(&first) = named(target).first()
+        {
+            target = first;
+        }
         if is_comment(target.kind()) || target.start_position().row != last_row(last) + 1 {
             continue;
         }
@@ -242,10 +445,12 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
             first = p;
         }
         let comment = &src[first.start_byte()..last.end_byte()];
-        if is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || !restates(comment, target, src) {
+        let skip = is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || looks_like_code(comment);
+        if skip || !restates(comment, target, src) {
             continue;
         }
-        hits.push(Hit { node: first, fix: Some(delete_lines(first, last, src)) });
+        let fix = Fix::new(FixLevel::Safe, vec![delete_lines(first, last, src)]);
+        hits.push(Hit { node: first, fix: Some(fix), note: None });
     }
     hits
 }
@@ -258,33 +463,17 @@ fn restates(comment: &str, target: Node, src: &str) -> bool {
     let comment_words: HashSet<String> = words(comment).into_iter().collect();
     let mut ids: HashSet<String> = descendants(target)
         .into_iter()
-        .filter(|n| n.child_count() == 0 && n.kind().ends_with("identifier"))
+        .filter(|n| n.child_count() == 0 && (n.kind().ends_with("identifier") || n.kind() == "name"))
         .flat_map(|n| words(text(n, src)))
         .collect();
     ids.remove("self");
     ids.remove("this");
-    // The +4 allows filler like "set the ... to"; longer comments are explaining something.
-    !ids.is_empty() && ids.is_subset(&comment_words) && comment_words.len() <= ids.len() + 4
-}
-
-/// Lowercase words, splitting on non-alphanumerics, camelCase and snake_case.
-fn words(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut prev_lower = false;
-    for ch in s.chars() {
-        if (!ch.is_alphanumeric() || (ch.is_uppercase() && prev_lower)) && !cur.is_empty() {
-            out.push(std::mem::take(&mut cur));
-        }
-        if ch.is_alphanumeric() {
-            cur.extend(ch.to_lowercase());
-        }
-        prev_lower = ch.is_lowercase() || ch.is_numeric();
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
+    // Beyond the code's own names, only filler and numbers ("set the age to 20"); any other word
+    // carries information ("SUBPLOT 2: AUC percentile ranges").
+    let extra_is_filler = comment_words
+        .difference(&ids)
+        .all(|w| FILLER.contains(&w.as_str()) || w.chars().all(|c| c.is_ascii_digit()));
+    !ids.is_empty() && ids.is_subset(&comment_words) && extra_is_filler
 }
 
 /// Whole lines from `first`'s line through `last`'s line, newline included.
@@ -302,6 +491,6 @@ fn delete_lines(first: Node, last: Node, src: &str) -> Edit {
 mod tests {
     #[test]
     fn words_split_case_and_punctuation() {
-        assert_eq!(super::words("// setUserAge to_20"), ["set", "user", "age", "to", "20"]);
+        assert_eq!(crate::ast::words("// setUserAge to_20"), ["set", "user", "age", "to", "20"]);
     }
 }

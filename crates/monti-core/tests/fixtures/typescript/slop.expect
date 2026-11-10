@@ -1,0 +1,10 @@
+4 swallowed-error
+11 swallowed-error
+15 comment-flood
+21 pass-through-wrapper
+27 redundant-null-check
+36 restating-comment
+44 commented-error
+49 unused-parameter
+49 type-escape
+50 type-escape

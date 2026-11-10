@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod detect;
 pub mod index;
+pub mod languages;
 pub mod metrics;
 pub mod rules;
 
@@ -12,10 +13,11 @@ use detect::Hit;
 use ignore::WalkBuilder;
 use metrics::Metrics;
 use rules::{Check, Rule, Severity};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, QueryCursor};
 
@@ -30,6 +32,35 @@ pub struct Edit {
     pub replacement: String,
 }
 
+/// How much a fix may change. Each level includes the ones below it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FixLevel {
+    /// Cannot change behavior (deletes comments).
+    Safe,
+    /// Behavior-preserving rewrites backed by a local proof (a just-assigned value is not null).
+    Standard,
+    /// Deletes or renames functions; relies on the test suite `monti fix` runs.
+    Aggressive,
+}
+
+/// Edits to one file, applied together or not at all.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Fix {
+    pub level: FixLevel,
+    pub edits: Vec<Edit>,
+    /// `(name, n)`: valid only if `name` occurs exactly `n` times in the whole repo, i.e. nowhere
+    /// outside this file. Checked by [`scan_path`]; [`scan`] cannot, so it drops such fixes.
+    #[serde(skip)]
+    pub requires_local: Vec<(String, usize)>,
+}
+
+impl Fix {
+    pub fn new(level: FixLevel, edits: Vec<Edit>) -> Fix {
+        Fix { level, edits, requires_local: Vec::new() }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Finding {
     pub rule_id: String,
@@ -39,13 +70,65 @@ pub struct Finding {
     pub line: usize,
     /// 1-based.
     pub column: usize,
-    pub fix: Option<Edit>,
+    pub fix: Option<Fix>,
+    /// Hash of the rule, the finding's line and the next non-blank line (trimmed): stable when code moves,
+    /// so baselines and SARIF can track a finding across edits.
+    pub fingerprint: String,
 }
 
 impl Finding {
-    fn new(rule: &Rule, line: usize, column: usize, message: String, fix: Option<Edit>) -> Finding {
-        Finding { rule_id: rule.id.clone(), severity: rule.severity, message, line, column, fix }
+    fn new(rule: &Rule, line: usize, column: usize, message: String, fix: Option<Fix>) -> Finding {
+        let rule_id = rule.id.clone();
+        Finding { rule_id, severity: rule.severity, message, line, column, fix, fingerprint: String::new() }
     }
+}
+
+/// Sets fingerprints, drops findings silenced by a `monti-ignore` comment, and sorts.
+fn finish(mut findings: Vec<Finding>, src: &str) -> Vec<Finding> {
+    let lines: Vec<&str> = src.lines().collect();
+    findings.retain(|f| !ignored(f, &lines));
+    for f in &mut findings {
+        // The next non-blank line too: a bare `} catch {` or MATLAB `catch` repeats within a file, its
+        // body or comment rarely does.
+        let text = lines.get(f.line - 1).map_or("", |l| l.trim());
+        let next = lines.iter().skip(f.line).map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("");
+        f.fingerprint = format!("{:016x}", index::hash((&f.rule_id, text, next)));
+    }
+    findings.sort_by(|a, b| (a.line, a.column, &a.rule_id, &a.message).cmp(&(b.line, b.column, &b.rule_id, &b.message)));
+    findings
+}
+
+const MARK: &str = "monti-ignore";
+
+/// Parses `text` for analysis. Comments holding `monti-ignore` are blanked to spaces first (byte
+/// offsets unchanged) so rules never see them: a marker inside an empty error handler must not make
+/// it a "commented" handler. Returns the analysed text and its tree.
+fn parse_for_rules(lang: Language, text: &str) -> Result<(String, tree_sitter::Tree)> {
+    let tree = ast::parse(lang, text)?;
+    if !text.contains(MARK) {
+        return Ok((text.to_string(), tree));
+    }
+    let mut bytes = text.as_bytes().to_vec();
+    for n in ast::descendants(tree.root_node()) {
+        if ast::is_comment(n.kind()) && text[n.byte_range()].contains(MARK) {
+            bytes[n.byte_range()].iter_mut().filter(|b| **b != b'\n').for_each(|b| *b = b' ');
+        }
+    }
+    let masked = String::from_utf8(bytes).expect("whole UTF-8 sequences were replaced by ASCII spaces");
+    let tree = ast::parse(lang, &masked)?;
+    Ok((masked, tree))
+}
+
+/// `monti-ignore` (every rule) or `monti-ignore: rule-a, rule-b`, on the finding's line or the line above.
+fn ignored(f: &Finding, lines: &[&str]) -> bool {
+    let here = f.line - 1;
+    [here.checked_sub(1), Some(here)].into_iter().flatten().filter_map(|i| lines.get(i)).any(|line| {
+        let Some(at) = line.find(MARK) else { return false };
+        match line[at + MARK.len()..].strip_prefix(':') {
+            None => true,
+            Some(ids) => ids.split(|c: char| c == ',' || c.is_whitespace()).any(|id| id == f.rule_id),
+        }
+    })
 }
 
 #[derive(Debug)]
@@ -71,18 +154,33 @@ impl FileReport {
     }
 }
 
-/// Runs the per-file rules that apply to `lang` against `source`. Repo-wide rules
-/// (duplicates, ghost abstractions) need [`scan_path`].
-pub fn scan(lang: Language, source: &str, rules: &[Rule]) -> Result<Vec<Finding>> {
-    let tree = ast::parse(lang, source)?;
-    let mut findings = scan_tree(lang, tree.root_node(), source, rules);
-    findings.sort_by_key(|f| (f.line, f.column));
+/// Runs the per-file rules that apply to `lang` against `source` (the contents of `path`, which
+/// need not exist on disk). Repo-wide rules (duplicates, ghost abstractions) need [`scan_path`].
+pub fn scan(lang: Language, path: &Path, source: &str, rules: &[Rule]) -> Result<Vec<Finding>> {
+    let (analysed, tree) = parse_for_rules(lang, source)?;
+    let mut findings = finish(scan_tree(lang, path, tree.root_node(), &analysed, rules), source);
+    // One file cannot prove a name is unused elsewhere.
+    for f in &mut findings {
+        f.fix = f.fix.take().filter(|fix| fix.requires_local.is_empty());
+    }
     Ok(findings)
 }
 
-fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Finding> {
+/// Test files by convention: `tests/`, `test/`, `__tests__/`, `e2e/`, `spec/` directories, or
+/// `*.test.*`, `*.spec.*`, `test_*`, `*_test.*` names.
+pub fn is_test_path(path: &Path) -> bool {
+    let dir = path.parent().into_iter().flat_map(|p| p.components()).any(|c| {
+        matches!(c.as_os_str().to_str(), Some("tests" | "test" | "__tests__" | "e2e" | "spec"))
+    });
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    dir || name.contains(".test.") || name.contains(".spec.") || name.starts_with("test_") || stem.ends_with("_test")
+}
+
+fn scan_tree(lang: Language, path: &Path, root: Node, src: &str, rules: &[Rule]) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for rule in rules.iter().filter(|r| r.languages.contains(&lang)) {
+    let test_file = is_test_path(path);
+    for rule in rules.iter().filter(|r| r.languages.contains(&lang) && !(r.skip_tests && test_file)) {
         let hits: Vec<Hit> = match &rule.check {
             Check::Query(queries) => {
                 let mut cursor = QueryCursor::new();
@@ -90,23 +188,31 @@ fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Findi
                 let mut hits = Vec::new();
                 while let Some(m) = matches.next() {
                     let node = m.captures().iter().map(|c| c.node).min_by_key(|n| n.start_byte()).unwrap();
-                    hits.push(Hit { node, fix: None });
+                    if !(rule.unless_comment_explains && detect::comments_explain(node, src)) {
+                        hits.push(Hit { node, fix: None, note: None });
+                    }
                 }
                 hits
             }
             Check::MaxCommentCodeRatio(max) => metrics::functions(lang, root)
                 .into_iter()
                 .filter(|f| metrics::comment_code_ratio(*f, src) > *max)
-                .map(|node| Hit { node, fix: None })
+                .map(|node| Hit { node, fix: None, note: None })
                 .collect(),
             Check::PassThroughWrapper => detect::pass_through_wrappers(lang, root, src),
             Check::RedundantNullCheck => detect::redundant_null_checks(lang, root, src),
             Check::RestatingComment => detect::restating_comments(root, src),
+            Check::UndefinedName => detect::undefined_names(lang, root, src),
+            Check::UnusedParameter => detect::unused_parameters(lang, root, src),
             Check::DuplicateFunction { .. } | Check::GhostAbstraction => continue,
         };
         findings.extend(hits.into_iter().map(|h| {
             let p = h.node.start_position();
-            Finding::new(rule, p.row + 1, p.column + 1, rule.message.clone(), h.fix)
+            let message = match h.note {
+                Some(note) => format!("{} ({note})", rule.message),
+                None => rule.message.clone(),
+            };
+            Finding::new(rule, p.row + 1, p.column + 1, message, h.fix)
         }));
     }
     findings
@@ -128,76 +234,222 @@ pub fn source_files(root: &Path) -> Result<Vec<(PathBuf, Language)>> {
     Ok(out)
 }
 
+/// A file the scan could not analyse, and why.
+#[derive(Debug, Clone, Serialize)]
+pub struct Skipped {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+#[derive(Debug)]
+pub struct Scan {
+    pub files: Vec<FileReport>,
+    pub skipped: Vec<Skipped>,
+}
+
+pub(crate) struct Source {
+    pub path: PathBuf,
+    pub language: Language,
+    /// The file as rules see it (`monti-ignore` comments blanked).
+    pub text: String,
+    /// The file as written, for ignore markers and fingerprints.
+    pub original: String,
+    pub tree: tree_sitter::Tree,
+}
+
+/// Reads and parses every supported file under `root`. Files that are not UTF-8, look minified,
+/// or do not parse are skipped with a reason: rules on an error-recovered tree produce noise, and
+/// grammars lag the languages, so one unparseable file must not stop the scan.
+pub(crate) fn load_sources(root: &Path) -> Result<(Vec<Source>, Vec<Skipped>)> {
+    let loaded = par_map(&source_files(root)?, |(path, language)| -> Result<Result<Source, Skipped>> {
+        let (path, language) = (path.clone(), *language);
+        let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        let parsed = String::from_utf8(bytes)
+            .map_err(|_| "not UTF-8".to_string())
+            .and_then(|text| if is_minified(&text) { Err("minified".to_string()) } else { Ok(text) })
+            .and_then(|original| match parse_for_rules(language, &original) {
+                Ok((text, tree)) => Ok((original, text, tree)),
+                Err(e) => Err(format!("{e:#}")),
+            });
+        Ok(match parsed {
+            Ok((original, text, tree)) => Ok(Source { path, language, text, original, tree }),
+            Err(reason) => Err(Skipped { path, reason }),
+        })
+    });
+    let mut sources = Vec::new();
+    let mut skipped = Vec::new();
+    for item in loaded {
+        match item? {
+            Ok(source) => sources.push(source),
+            Err(skip) => skipped.push(skip),
+        }
+    }
+    Ok((sources, skipped))
+}
+
+/// `items.iter().map(f)` on all cores, results in input order.
+pub(crate) fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let mut done: Vec<(usize, R)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(i) else { return mine };
+                        mine.push((i, f(item)));
+                    }
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().expect("scan worker panicked")).collect()
+    });
+    done.sort_unstable_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, r)| r).collect()
+}
+
+/// Bundled or minified code averages hundreds of characters per line; hand-written code ~40.
+fn is_minified(text: &str) -> bool {
+    let lines = text.lines().filter(|l| !l.trim().is_empty()).count();
+    lines > 0 && text.len() / lines > 300
+}
+
 /// Scans every supported file under `root` with per-file and repo-wide rules.
-pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Vec<FileReport>> {
+pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
+    let (sources, skipped) = load_sources(root)?;
+    let analysed = par_map(&sources, |s| {
+        let root_node = s.tree.root_node();
+        let report = FileReport {
+            findings: scan_tree(s.language, &s.path, root_node, &s.text, rules),
+            metrics: metrics::measure(root_node, &s.text),
+            path: s.path.clone(),
+            language: s.language,
+        };
+        (report, index::Index::of_file(&s.path, s.language, root_node, &s.text))
+    });
     let mut index = index::Index::default();
     let mut reports = Vec::new();
-    for (path, lang) in source_files(root)? {
-        let src = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-        let tree = ast::parse(lang, &src).with_context(|| path.display().to_string())?;
-        let root_node = tree.root_node();
-        index.add(&path, lang, root_node, &src);
-        reports.push(FileReport {
-            findings: scan_tree(lang, root_node, &src, rules),
-            metrics: metrics::measure(root_node, &src),
-            path,
-            language: lang,
-        });
+    for (report, part) in analysed {
+        reports.push(report);
+        index.merge(part);
     }
 
     let slot: HashMap<PathBuf, usize> = reports.iter().enumerate().map(|(i, r)| (r.path.clone(), i)).collect();
+    let by_path: HashMap<&Path, &Source> = sources.iter().map(|s| (s.path.as_path(), s)).collect();
     for rule in rules {
-        let mut push = |path: &Path, line, column, message| {
-            reports[slot[path]].findings.push(Finding::new(rule, line, column, message, None));
+        let mut push = |path: &Path, line, column, message, fix| {
+            reports[slot[path]].findings.push(Finding::new(rule, line, column, message, fix));
         };
         match rule.check {
             Check::DuplicateFunction { min_similarity } => {
+                // One finding per copy, naming its closest match: N copies of a helper give N
+                // findings, not N * (N - 1).
+                let mut matches: Copies = HashMap::new();
                 for (a, b, s) in index.duplicates(min_similarity) {
                     if !rule.languages.contains(&a.language) {
                         continue;
                     }
-                    for (this, other) in [(a, b), (b, a)] {
-                        let message = format!(
-                            "{} ({:.0}% match with `{}` at {}:{})",
-                            rule.message,
-                            s * 100.0,
-                            other.name,
-                            other.path.display(),
-                            other.line
-                        );
-                        push(&this.path, this.line, this.column, message);
-                    }
+                    matches.entry(a as *const _).or_insert((a, Vec::new())).1.push((b, s));
+                    matches.entry(b as *const _).or_insert((b, Vec::new())).1.push((a, s));
+                }
+                let mut copies: Vec<_> = matches.into_values().collect();
+                copies.sort_by(|x, y| (&x.0.path, x.0.range.start).cmp(&(&y.0.path, y.0.range.start)));
+                for (this, mut others) in copies {
+                    others.sort_by(|x, y| y.1.total_cmp(&x.1).then((&x.0.path, x.0.line).cmp(&(&y.0.path, y.0.line))));
+                    let (best, s) = others[0];
+                    let more = match others.len() - 1 {
+                        0 => String::new(),
+                        n => format!(" and {n} more"),
+                    };
+                    let message = format!(
+                        "{} ({:.0}% match with `{}` at {}:{}{more})",
+                        rule.message,
+                        s * 100.0,
+                        best.name,
+                        best.path.display(),
+                        best.line
+                    );
+                    // The later of two exact same-file copies gets the merge fix.
+                    let fix = others
+                        .iter()
+                        .find(|(o, s)| *s == 1.0 && o.path == this.path && o.range.start < this.range.start)
+                        .and_then(|(keep, _)| merge_fix(keep, this, by_path[this.path.as_path()]));
+                    push(&this.path, this.line, this.column, message, fix);
                 }
             }
             Check::GhostAbstraction => {
                 for g in index.ghosts().into_iter().filter(|g| rule.languages.contains(&g.language)) {
-                    push(&g.path, g.line, g.column, format!("{} (`{}`)", rule.message, g.name));
+                    push(&g.path, g.line, g.column, format!("{} (`{}`)", rule.message, g.name), None);
                 }
             }
             _ => {}
         }
     }
 
-    for r in &mut reports {
-        r.findings.sort_by(|a, b| (a.line, a.column, &a.rule_id).cmp(&(b.line, b.column, &b.rule_id)));
+    for (r, s) in reports.iter_mut().zip(&sources) {
+        r.findings = finish(std::mem::take(&mut r.findings), &s.original);
+        for f in &mut r.findings {
+            f.fix = f.fix.take().filter(|fix| fix.requires_local.iter().all(|(name, n)| index.occurrences(name) == *n));
+        }
     }
-    Ok(reports)
+    Ok(Scan { files: reports, skipped })
 }
 
-/// Applies edits to `src`. An edit overlapping an earlier one is skipped; rerun to pick it up.
-pub fn apply_fixes(src: &str, edits: &[&Edit]) -> String {
-    let mut edits = edits.to_vec();
-    edits.sort_by_key(|e| e.start);
+/// Each duplicated function (keyed by address) with the functions it matches and how closely.
+type Copies<'a> = HashMap<*const index::FnEntry, (&'a index::FnEntry, Vec<(&'a index::FnEntry, f64)>)>;
+
+/// Aggressive fix for an exact same-file copy: delete `drop` and call `keep` instead. Only when
+/// bodies and parameter lists are identical text (whitespace aside) and both are top-level.
+fn merge_fix(keep: &index::FnEntry, drop: &index::FnEntry, src: &Source) -> Option<Fix> {
+    if keep.path != drop.path || keep.name == drop.name {
+        return None;
+    }
+    let root = src.tree.root_node();
+    let find = |e: &index::FnEntry| ast::descendants(root).into_iter().find(|n| n.byte_range() == e.range);
+    let (k, d) = (find(keep)?, find(drop)?);
+    let norm = |n: Option<Node>| n.map(|n| src.text[n.byte_range()].split_whitespace().collect::<Vec<_>>().join(" "));
+    let same = norm(k.child_by_field_name("body")) == norm(d.child_by_field_name("body"))
+        && norm(detect::parameter_list(k)) == norm(detect::parameter_list(d));
+    let keep_top_level = k.parent().is_some_and(|p| p == root || p.parent() == Some(root));
+    if !same || !keep_top_level {
+        return None;
+    }
+    let mut renames = detect::calls_only(src.language, root, d, &src.text)?;
+    renames.iter_mut().for_each(|e| e.replacement = keep.name.clone());
+    Some(detect::delete_function(d, &src.text, renames, drop.name.clone()))
+}
+
+/// Applies fixes to `src`. A fix with an edit overlapping an earlier fix's is skipped whole;
+/// rerun to pick it up.
+pub fn apply_fixes(src: &str, fixes: &[&Fix]) -> String {
+    let mut fixes = fixes.to_vec();
+    fixes.sort_by_key(|f| f.edits.iter().map(|e| e.start).min());
+    let mut taken: Vec<&Edit> = Vec::new();
+    for fix in fixes {
+        let overlaps = fix.edits.iter().any(|e| taken.iter().any(|t| e.start < t.end && t.start < e.end));
+        if !overlaps {
+            taken.extend(&fix.edits);
+        }
+    }
+    taken.sort_by_key(|e| e.start);
     let mut out = String::with_capacity(src.len());
     let mut pos = 0;
-    for e in edits {
-        if e.start < pos {
-            continue;
-        }
+    for e in taken {
         out.push_str(&src[pos..e.start]);
         out.push_str(&e.replacement);
         pos = e.end;
     }
     out.push_str(&src[pos..]);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn par_map_keeps_input_order() {
+        let items: Vec<u64> = (0..1000).collect();
+        assert_eq!(super::par_map(&items, |x| x * 2), items.iter().map(|x| x * 2).collect::<Vec<_>>());
+    }
 }
