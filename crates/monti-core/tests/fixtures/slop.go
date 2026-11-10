@@ -23,3 +23,10 @@ func Bump(count int) int {
 	count++
 	return count
 }
+
+func Drop(path string) {
+	err := remove(path)
+	if err != nil {
+		// best effort
+	}
+}

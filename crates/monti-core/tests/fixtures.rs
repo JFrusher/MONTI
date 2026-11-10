@@ -2,7 +2,10 @@ use monti_core::ast::{self, Language};
 use monti_core::rules::{DEFAULT_RULES, parse_rules};
 use monti_core::{apply_fixes, metrics, scan, scan_path};
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
+
+mod common;
+use common::temp_dir;
 
 fn hits(lang: Language, src: &str) -> Vec<(String, usize)> {
     let rules = parse_rules(DEFAULT_RULES).unwrap();
@@ -13,13 +16,6 @@ fn owned(v: &[(&str, usize)]) -> Vec<(String, usize)> {
     v.iter().map(|(id, l)| (id.to_string(), *l)).collect()
 }
 
-/// A fresh empty directory under the system temp dir.
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("monti-core-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
 
 #[test]
 fn typescript_slop_is_flagged() {
@@ -32,6 +28,7 @@ fn typescript_slop_is_flagged() {
             ("pass-through-wrapper", 21),
             ("redundant-null-check", 27),
             ("restating-comment", 36),
+            ("swallowed-catch", 44),
         ])
     );
 }
@@ -47,6 +44,7 @@ fn python_slop_is_flagged() {
             ("redundant-null-check", 20),
             ("comment-flood", 26),
             ("restating-comment", 27),
+            ("swallowed-except", 36),
         ])
     );
 }
@@ -55,7 +53,12 @@ fn python_slop_is_flagged() {
 fn rust_slop_is_flagged() {
     assert_eq!(
         hits(Language::Rust, include_str!("fixtures/slop.rs")),
-        owned(&[("swallowed-err-arm", 4), ("pass-through-wrapper", 8), ("restating-comment", 13)])
+        owned(&[
+            ("swallowed-err-arm", 4),
+            ("pass-through-wrapper", 8),
+            ("restating-comment", 13),
+            ("swallowed-err-arm", 20),
+        ])
     );
 }
 
@@ -68,7 +71,21 @@ fn go_slop_is_flagged() {
             ("pass-through-wrapper", 9),
             ("redundant-null-check", 15),
             ("restating-comment", 22),
+            ("swallowed-err-check", 29),
         ])
+    );
+}
+
+#[test]
+fn tsx_and_javascript_are_scanned() {
+    assert_eq!(Language::from_path(Path::new("a.tsx")), Some(Language::Tsx));
+    for ext in ["js", "jsx", "mjs", "cjs"] {
+        assert_eq!(Language::from_path(Path::new(&format!("a.{ext}"))), Some(Language::JavaScript));
+    }
+    assert_eq!(hits(Language::Tsx, include_str!("fixtures/slop.tsx")), owned(&[("swallowed-catch", 4)]));
+    assert_eq!(
+        hits(Language::JavaScript, include_str!("fixtures/slop.js")),
+        owned(&[("swallowed-catch", 4), ("pass-through-wrapper", 9)])
     );
 }
 

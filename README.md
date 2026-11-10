@@ -1,6 +1,6 @@
 # MONTI
 
-Deterministic anti-slop code sweeper for TypeScript, Python, Rust and Go. Named for MSG Jared C. Monti.
+Deterministic anti-slop code sweeper for TypeScript, TSX, JavaScript (.js .jsx .mjs .cjs), Python, Rust and Go. Named for MSG Jared C. Monti.
 
 It finds LLM "slop grenades" with Tree-sitter queries and AST metrics, no LLM involved:
 swallowed errors, comment floods, comments that restate code, pass-through wrappers,
@@ -39,15 +39,15 @@ The table key is the rule id. Each rule sets exactly one check:
 | `max_comment_code_ratio` | Comment lines / code lines per function. |
 | `check = "restating-comment"` | Own-line comment whose words cover every identifier of the next statement. Fixable. |
 | `check = "pass-through-wrapper"` | Body is one call forwarding the parameters unchanged. |
-| `check = "redundant-null-check"` | Null test right after a non-null assignment (TS, Python, Go). Fixable. |
+| `check = "redundant-null-check"` | Null test right after a non-null assignment (TS, TSX, JS, Python, Go). Fixable. |
 | `check = "duplicate-function"` + `min_similarity` | Repo-wide Jaccard similarity of identifier-blind AST shingles. |
-| `check = "ghost-abstraction"` | Interface / abstract class / trait with one implementor and at most one other use (TS, Python, Rust). |
+| `check = "ghost-abstraction"` | Interface / abstract class / trait with one implementor and at most one other use (TS, TSX, Python, Rust). |
 
 ```toml
 [rules.swallowed-catch]
 severity = "error"            # "error" | "warning"
 message = "Empty catch block."
-languages = ["typescript"]    # "typescript" | "python" | "rust" | "go"
+languages = ["typescript"]    # "typescript" | "tsx" | "javascript" | "python" | "rust" | "go"
 tree_sitter_query = '''
 (catch_clause body: (statement_block) @block (#match? @block "^\\{\\s*\\}$"))
 '''

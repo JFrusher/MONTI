@@ -138,7 +138,7 @@ fn single(n: Node) -> Option<Node> {
 
 fn non_null(lang: Language, v: Node, src: &str) -> bool {
     match lang {
-        Language::TypeScript => matches!(
+        Language::TypeScript | Language::Tsx | Language::JavaScript => matches!(
             v.kind(),
             "new_expression" | "object" | "array" | "string" | "template_string" | "number" | "true" | "false"
                 | "arrow_function" | "function_expression"
@@ -162,7 +162,7 @@ fn non_null(lang: Language, v: Node, src: &str) -> bool {
 fn is_null_test(lang: Language, cond: &str, name: &str) -> bool {
     let c: String = cond.chars().filter(|ch| !ch.is_whitespace() && !matches!(ch, '(' | ')')).collect();
     let (nulls, ops): (&[&str], &[&str]) = match lang {
-        Language::TypeScript => (&["null", "undefined"], &["!=", "!=="]),
+        Language::TypeScript | Language::Tsx | Language::JavaScript => (&["null", "undefined"], &["!=", "!=="]),
         Language::Python => (&["None"], &["isnot", "!="]),
         Language::Go => (&["nil"], &["!="]),
         Language::Rust => (&[], &[]),

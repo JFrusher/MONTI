@@ -5,12 +5,12 @@
 
 [rules.swallowed-catch]
 severity = "error"
-message = "Empty catch block. Swallowing exceptions without handling is AI defensive slop."
-languages = ["typescript"]
+message = "Catch block is empty or only comments. Swallowing exceptions without handling is AI defensive slop."
+languages = ["typescript", "tsx", "javascript"]
 tree_sitter_query = '''
 (catch_clause
   body: (statement_block) @block
-  (#match? @block "^\\{\\s*\\}$"))
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$"))
 '''
 
 [rules.swallowed-except]
@@ -31,7 +31,7 @@ tree_sitter_query = '''
   pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
   value: (block) @block
   (#eq? @variant "Err")
-  (#match? @block "^\\{\\s*\\}$"))
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$"))
 '''
 
 [rules.swallowed-err-check]
@@ -43,42 +43,42 @@ tree_sitter_query = '''
   condition: (binary_expression left: (identifier) @err right: (nil))
   consequence: (block) @block
   (#eq? @err "err")
-  (#match? @block "^\\{\\s*\\}$"))
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$"))
 '''
 
 [rules.comment-flood]
 severity = "warning"
 message = "Comment-to-code ratio too high; comments likely restate the code."
-languages = ["typescript", "python", "rust", "go"]
+languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
 max_comment_code_ratio = 0.35
 
 [rules.restating-comment]
 severity = "warning"
 message = "Comment restates the code below it."
-languages = ["typescript", "python", "rust", "go"]
+languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
 check = "restating-comment"
 
 [rules.pass-through-wrapper]
 severity = "warning"
 message = "Function only forwards its parameters to another call; call the target directly."
-languages = ["typescript", "python", "rust", "go"]
+languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
 check = "pass-through-wrapper"
 
 [rules.redundant-null-check]
 severity = "warning"
 message = "Null check on a value that was just assigned a non-null value."
-languages = ["typescript", "python", "go"]
+languages = ["typescript", "tsx", "javascript", "python", "go"]
 check = "redundant-null-check"
 
 [rules.duplicate-function]
 severity = "warning"
 message = "Structurally duplicates another function; reuse it."
-languages = ["typescript", "python", "rust", "go"]
+languages = ["typescript", "tsx", "javascript", "python", "rust", "go"]
 check = "duplicate-function"
 min_similarity = 0.85
 
 [rules.ghost-abstraction]
 severity = "warning"
 message = "Abstraction has a single implementor and at most one use; inline it."
-languages = ["typescript", "python", "rust"]
+languages = ["typescript", "tsx", "python", "rust"]
 check = "ghost-abstraction"

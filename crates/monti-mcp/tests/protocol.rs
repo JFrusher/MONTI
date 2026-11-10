@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 use std::fs;
 
+#[path = "../../monti-core/tests/common/mod.rs"]
+mod common;
+
 fn session(root: &std::path::Path, requests: &[Value]) -> Vec<Value> {
     let input: String = requests.iter().map(|r| format!("{r}\n")).collect();
     let mut out = Vec::new();
@@ -15,9 +18,7 @@ fn tool_json(response: &Value) -> Value {
 
 #[test]
 fn audit_and_duplicate_tools_over_stdio() {
-    let root = std::env::temp_dir().join(format!("monti-mcp-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
+    let root = common::temp_dir("mcp");
     fs::write(root.join("util.py"), "def clamp(value, low, high):\n    if value < low:\n        return low\n    if value > high:\n        return high\n    return value\n").unwrap();
 
     let call = |id: u64, name: &str, args: Value| {

@@ -163,7 +163,7 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
 
 fn formatter(lang: Language) -> &'static [&'static str] {
     match lang {
-        Language::TypeScript => &["prettier", "--write"],
+        Language::TypeScript | Language::Tsx | Language::JavaScript => &["prettier", "--write"],
         Language::Python => &["ruff", "format"],
         Language::Rust => &["rustfmt", "--edition", "2024"],
         Language::Go => &["gofmt", "-w"],

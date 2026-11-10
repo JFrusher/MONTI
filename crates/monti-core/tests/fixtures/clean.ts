@@ -12,3 +12,11 @@ export function total(items: number[]): number {
   const tax = sum * 0.2;
   return sum + tax;
 }
+
+export function warn(): void {
+  try {
+    run();
+  } catch (e) {
+    /* keep going */ report(e); /* logged */
+  }
+}

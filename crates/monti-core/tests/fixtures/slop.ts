@@ -37,3 +37,11 @@ export class Person {
     this.age = 20;
   }
 }
+
+export function quiet(): void {
+  try {
+    run();
+  } catch {
+    // ignore
+  }
+}

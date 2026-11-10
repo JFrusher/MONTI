@@ -26,3 +26,11 @@ class Person:
     def grow(self):
         # increment age
         self.age += 1
+
+
+def quiet():
+    try:
+        run()
+    except Exception:
+        # ignore
+        pass

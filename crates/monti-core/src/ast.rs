@@ -7,6 +7,8 @@ use tree_sitter::{Node, Parser, Tree};
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     TypeScript,
+    Tsx,
+    JavaScript,
     Python,
     Rust,
     Go,
@@ -16,6 +18,8 @@ impl Language {
     pub fn from_path(path: &Path) -> Option<Language> {
         match path.extension()?.to_str()? {
             "ts" | "mts" | "cts" => Some(Language::TypeScript),
+            "tsx" => Some(Language::Tsx),
+            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "py" => Some(Language::Python),
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
@@ -26,6 +30,8 @@ impl Language {
     pub fn grammar(self) -> tree_sitter::Language {
         match self {
             Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Language::Python => tree_sitter_python::LANGUAGE.into(),
             Language::Rust => tree_sitter_rust::LANGUAGE.into(),
             Language::Go => tree_sitter_go::LANGUAGE.into(),
@@ -35,7 +41,7 @@ impl Language {
     /// Node kinds that count as a function for per-function checks.
     pub fn function_kinds(self) -> &'static [&'static str] {
         match self {
-            Language::TypeScript => &[
+            Language::TypeScript | Language::Tsx | Language::JavaScript => &[
                 "function_declaration",
                 "function_expression",
                 "arrow_function",

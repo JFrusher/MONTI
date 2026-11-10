@@ -3,12 +3,9 @@ use std::process::Command;
 
 const MONTI: &str = env!("CARGO_BIN_EXE_monti");
 
-fn temp_dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("monti-cli-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
+#[path = "../../monti-core/tests/common/mod.rs"]
+mod common;
+use common::temp_dir;
 
 const SLOP: &str = "def build():\n    items = []\n    if items is not None:\n        items.append(1)\n    return items\n\n\ndef load(p):\n    try:\n        return open(p).read()\n    except OSError:\n        pass\n";
 

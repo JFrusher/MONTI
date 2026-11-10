@@ -32,11 +32,12 @@ impl Builtin {
         use Language::*;
         match self {
             Builtin::PassThroughWrapper | Builtin::RestatingComment | Builtin::DuplicateFunction => {
-                &[TypeScript, Python, Rust, Go]
+                &[TypeScript, Tsx, JavaScript, Python, Rust, Go]
             }
-            Builtin::RedundantNullCheck => &[TypeScript, Python, Go],
+            Builtin::RedundantNullCheck => &[TypeScript, Tsx, JavaScript, Python, Go],
             // Go interfaces are satisfied implicitly, so implementors cannot be counted syntactically.
-            Builtin::GhostAbstraction => &[TypeScript, Python, Rust],
+            // JavaScript has no interfaces or abstract classes.
+            Builtin::GhostAbstraction => &[TypeScript, Tsx, Python, Rust],
         }
     }
 }

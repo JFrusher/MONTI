@@ -156,7 +156,7 @@ fn jaccard(a: &HashSet<u64>, b: &HashSet<u64>) -> f64 {
 
 fn abstraction_name<'s>(lang: Language, n: Node, src: &'s str) -> Option<&'s str> {
     let is_abstract = match lang {
-        Language::TypeScript => matches!(n.kind(), "interface_declaration" | "abstract_class_declaration"),
+        Language::TypeScript | Language::Tsx => matches!(n.kind(), "interface_declaration" | "abstract_class_declaration"),
         Language::Rust => n.kind() == "trait_item",
         Language::Python => {
             n.kind() == "class_definition"
@@ -167,7 +167,7 @@ fn abstraction_name<'s>(lang: Language, n: Node, src: &'s str) -> Option<&'s str
                         .any(|t| matches!(t, "ABC" | "ABCMeta"))
                 })
         }
-        Language::Go => false,
+        Language::JavaScript | Language::Go => false,
     };
     if !is_abstract {
         return None;
@@ -178,7 +178,7 @@ fn abstraction_name<'s>(lang: Language, n: Node, src: &'s str) -> Option<&'s str
 /// Names of the abstractions node `n` implements or extends.
 fn implemented<'s>(lang: Language, n: Node, src: &'s str) -> HashSet<&'s str> {
     let heritage = match (lang, n.kind()) {
-        (Language::TypeScript, "class_declaration" | "abstract_class_declaration") => {
+        (Language::TypeScript | Language::Tsx, "class_declaration" | "abstract_class_declaration") => {
             let mut cursor = n.walk();
             n.children(&mut cursor).find(|c| c.kind() == "class_heritage")
         }

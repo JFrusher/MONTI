@@ -13,3 +13,10 @@ pub fn bump(counter: &mut u32) {
     // increment counter
     *counter += 1;
 }
+
+pub fn drop_err(path: &str) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(_) => { /* already gone */ }
+    }
+}
