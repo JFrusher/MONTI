@@ -30,7 +30,7 @@ fn audit_and_duplicate_tools_over_stdio() {
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}),
             json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-            call(3, "monti_audit_file", json!({"path": "buffer.py", "content": "try:\n    go()\nexcept Exception:\n    pass\n"})),
+            call(3, "monti_audit_file", json!({"path": "buffer.py", "content": "try:\n    print()\nexcept Exception:\n    pass\n"})),
             call(4, "monti_find_duplicate_utils", json!({"language": "python", "code": "def bound(x, lo, hi):\n    if x < lo:\n        return lo\n    if x > hi:\n        return hi\n    return x\n"})),
             call(5, "monti_audit_file", json!({"path": "notes.txt"})),
             json!({"jsonrpc": "2.0", "id": 6, "method": "nope"}),

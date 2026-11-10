@@ -10,6 +10,8 @@ use tree_sitter::Node;
 pub struct Hit<'t> {
     pub node: Node<'t>,
     pub fix: Option<Edit>,
+    /// Appended to the rule message, e.g. which name.
+    pub note: Option<String>,
 }
 
 fn text<'s>(n: Node, src: &'s str) -> &'s str {
@@ -29,7 +31,7 @@ pub fn pass_through_wrappers<'t>(lang: Language, root: Node<'t>, src: &str) -> V
     functions(lang, root)
         .into_iter()
         .filter(|f| !is_method(lang, *f) && !is_callback(*f) && is_pass_through(lang, *f, src))
-        .map(|node| Hit { node, fix: None })
+        .map(|node| Hit { node, fix: None, note: None })
         .collect()
 }
 
@@ -150,7 +152,7 @@ pub fn redundant_null_checks<'t>(lang: Language, root: Node<'t>, src: &str) -> V
             continue;
         }
         let fix = if named(node).len() == 2 { unwrap_if(node, src) } else { None };
-        hits.push(Hit { node, fix });
+        hits.push(Hit { node, fix, note: None });
     }
     hits
 }
@@ -217,6 +219,84 @@ fn unwrap_if(if_node: Node, src: &str) -> Option<Edit> {
     Some(Edit { start: if_node.start_byte(), end: if_node.end_byte(), replacement })
 }
 
+// ---- undefined names ------------------------------------------------------
+
+/// Bare calls to a name that appears nowhere else in the file and is not a builtin: in a dynamic
+/// language that is a NameError waiting to happen, typically a hallucinated helper.
+pub fn undefined_names<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
+    let spec = lang.spec();
+    let Some(undefined) = &spec.undefined else { return Vec::new() };
+    let nodes = descendants(root);
+    if nodes.iter().any(|n| n.kind() == undefined.wildcard_import) {
+        return Vec::new();
+    }
+    let mut callees = Vec::new();
+    let mut elsewhere = HashSet::new();
+    for n in nodes.into_iter().filter(|n| n.kind() == "identifier") {
+        let callee = n.parent().is_some_and(|p| spec.calls.contains(&p.kind()) && p.child_by_field_name("function") == Some(n));
+        if callee {
+            callees.push(n);
+        } else {
+            elsewhere.insert(text(n, src));
+        }
+    }
+    callees
+        .into_iter()
+        .filter(|n| !elsewhere.contains(text(*n, src)) && !undefined.builtins.contains(&text(*n, src)))
+        .map(|node| Hit { node, fix: None, note: Some(format!("`{}`", text(node, src))) })
+        .collect()
+}
+
+// ---- unused parameters ------------------------------------------------------
+
+/// Free functions with a parameter the body never mentions. Methods, callbacks and decorated
+/// functions are skipped (their signature is usually imposed), as are stubs, `_`-prefixed names and
+/// splats.
+pub fn unused_parameters<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
+    let mut hits = Vec::new();
+    for f in functions(lang, root) {
+        if is_method(lang, f) || is_callback(f) || f.parent().is_some_and(|p| p.kind() == "decorated_definition") {
+            continue;
+        }
+        // Test runners inject parameters by name (pytest fixtures, Go's `t`): a fixture requested
+        // only for its side effect is not unused.
+        if f.child_by_field_name("name").is_some_and(|n| text(n, src).to_lowercase().starts_with("test")) {
+            continue;
+        }
+        let (Some(params), Some(body)) = (param_names(f, src), f.child_by_field_name("body")) else { continue };
+        if is_stub(body) {
+            continue;
+        }
+        // Whole words of the body text, not just identifier nodes: names used inside format strings
+        // (`format!("{name}")`) and interpolations are not identifiers in every grammar.
+        let used: HashSet<&str> = text(body, src).split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+        // Plain names only (`x`, PHP `$x`, Rust `mut x`); destructuring patterns and splats are skipped.
+        let unused: Vec<String> = params
+            .iter()
+            .map(|p| p.trim_start_matches('$').trim_start_matches("mut "))
+            .filter(|p| p.chars().all(|c| c.is_alphanumeric() || c == '_'))
+            .filter(|name| !name.is_empty() && !name.starts_with('_') && !used.contains(name))
+            .map(|name| format!("`{name}`"))
+            .collect();
+        if !unused.is_empty() {
+            hits.push(Hit { node: f, fix: None, note: Some(unused.join(", ")) });
+        }
+    }
+    hits
+}
+
+/// A body that only declares the signature: `...`, `pass`, `raise NotImplementedError`, or nothing.
+fn is_stub(body: Node) -> bool {
+    match named(body).as_slice() {
+        [] => true,
+        [only] => {
+            matches!(only.kind(), "pass_statement" | "ellipsis" | "raise_statement")
+                || (only.kind() == "expression_statement" && named(*only).first().is_some_and(|e| e.kind() == "ellipsis"))
+        }
+        _ => false,
+    }
+}
+
 // ---- restating comments ----------------------------------------------------
 
 /// Notes and doc comments are never "restating", whatever their words.
@@ -246,7 +326,7 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
         if is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || !restates(comment, target, src) {
             continue;
         }
-        hits.push(Hit { node: first, fix: Some(delete_lines(first, last, src)) });
+        hits.push(Hit { node: first, fix: Some(delete_lines(first, last, src)), note: None });
     }
     hits
 }

@@ -1,3 +1,5 @@
+from storage import read_file, report_dir
+
 def load(path):
     try:
         return read_file(path)
@@ -23,3 +25,7 @@ class RealHardware:
 
 def defaults(**overrides):
     return {**BASE, **overrides}  # type: ignore[arg-type]
+
+
+def test_writes_report(tmp_path, monkeypatch):
+    assert report_dir().exists()

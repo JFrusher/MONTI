@@ -25,6 +25,8 @@ pub enum Builtin {
     RestatingComment,
     DuplicateFunction,
     GhostAbstraction,
+    UndefinedName,
+    UnusedParameter,
 }
 
 impl Builtin {
@@ -34,7 +36,8 @@ impl Builtin {
             Builtin::PassThroughWrapper => !spec.calls.is_empty(),
             Builtin::RedundantNullCheck => spec.null_check.is_some(),
             Builtin::GhostAbstraction => spec.ghost.is_some(),
-            Builtin::RestatingComment | Builtin::DuplicateFunction => true,
+            Builtin::UndefinedName => spec.undefined.is_some(),
+            Builtin::RestatingComment | Builtin::DuplicateFunction | Builtin::UnusedParameter => true,
         }
     }
 }
@@ -52,6 +55,8 @@ pub enum Check {
     DuplicateFunction { min_similarity: f64 },
     /// Repo-wide: an interface/abstract class/trait with one implementor and at most one other use.
     GhostAbstraction,
+    UndefinedName,
+    UnusedParameter,
 }
 
 #[derive(Debug)]
@@ -136,6 +141,8 @@ fn compile(id: String, raw: RawRule) -> Result<Rule> {
                 Builtin::RedundantNullCheck => Check::RedundantNullCheck,
                 Builtin::RestatingComment => Check::RestatingComment,
                 Builtin::GhostAbstraction => Check::GhostAbstraction,
+                Builtin::UndefinedName => Check::UndefinedName,
+                Builtin::UnusedParameter => Check::UnusedParameter,
                 Builtin::DuplicateFunction => {
                     let min = raw.min_similarity.with_context(|| format!("rule `{id}`: needs `min_similarity`"))?;
                     ensure!(min > 0.0 && min <= 1.0, "rule `{id}`: min_similarity must be in (0, 1]");

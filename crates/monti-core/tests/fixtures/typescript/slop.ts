@@ -45,3 +45,8 @@ export function quiet(): void {
     // ignore
   }
 }
+
+export function parse(raw: string, strict: boolean): any {
+  // @ts-ignore
+  return JSON.parse(raw);
+}

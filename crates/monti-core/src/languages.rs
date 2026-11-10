@@ -29,6 +29,8 @@ pub struct Spec {
     pub null_check: Option<NullCheck>,
     /// Enables ghost-abstraction.
     pub ghost: Option<Ghost>,
+    /// Enables undefined-name (for dynamic languages, where calling an unknown name is a runtime error).
+    pub undefined: Option<Undefined>,
     /// Formatter command `monti fix` runs on changed files (the path is appended). Empty: none.
     pub formatter: &'static [&'static str],
 }
@@ -40,6 +42,13 @@ pub struct NullCheck {
     pub ops: &'static [&'static str],
     /// True when an assigned value can never be null.
     pub non_null: fn(Node, &str) -> bool,
+}
+
+pub struct Undefined {
+    /// Names callable without a definition or import.
+    pub builtins: &'static [&'static str],
+    /// Node kind of an import that can bring in any name (`from x import *`); files with one are skipped.
+    pub wildcard_import: &'static str,
 }
 
 pub struct Ghost {
@@ -88,6 +97,29 @@ const TS_GHOST: Ghost = Ghost {
 
 const JS_FORMAT: &[&str] = &["prettier", "--write"];
 
+/// `dir(builtins)` of Python 3.13, public names plus `__import__` and `__build_class__`.
+const PYTHON_BUILTINS: &[&str] = &[
+    "ArithmeticError", "AssertionError", "AttributeError", "BaseException", "BaseExceptionGroup", "BlockingIOError", "BrokenPipeError", "BufferError",
+    "BytesWarning", "ChildProcessError", "ConnectionAbortedError", "ConnectionError", "ConnectionRefusedError", "ConnectionResetError", "DeprecationWarning", "EOFError",
+    "Ellipsis", "EncodingWarning", "EnvironmentError", "Exception", "ExceptionGroup", "False", "FileExistsError", "FileNotFoundError",
+    "FloatingPointError", "FutureWarning", "GeneratorExit", "IOError", "ImportError", "ImportWarning", "IndentationError", "IndexError",
+    "InterruptedError", "IsADirectoryError", "KeyError", "KeyboardInterrupt", "LookupError", "MemoryError", "ModuleNotFoundError", "NameError",
+    "None", "NotADirectoryError", "NotImplemented", "NotImplementedError", "OSError", "OverflowError", "PendingDeprecationWarning", "PermissionError",
+    "ProcessLookupError", "PythonFinalizationError", "RecursionError", "ReferenceError", "ResourceWarning", "RuntimeError", "RuntimeWarning", "StopAsyncIteration",
+    "StopIteration", "SyntaxError", "SyntaxWarning", "SystemError", "SystemExit", "TabError", "TimeoutError", "True",
+    "TypeError", "UnboundLocalError", "UnicodeDecodeError", "UnicodeEncodeError", "UnicodeError", "UnicodeTranslateError", "UnicodeWarning", "UserWarning",
+    "ValueError", "Warning", "ZeroDivisionError", "__build_class__", "__import__", "abs", "aiter", "all",
+    "anext", "any", "ascii", "bin", "bool", "breakpoint", "bytearray", "bytes",
+    "callable", "chr", "classmethod", "compile", "complex", "copyright", "credits", "delattr",
+    "dict", "dir", "divmod", "enumerate", "eval", "exec", "exit", "filter",
+    "float", "format", "frozenset", "getattr", "globals", "hasattr", "hash", "help",
+    "hex", "id", "input", "int", "isinstance", "issubclass", "iter", "len",
+    "license", "list", "locals", "map", "max", "memoryview", "min", "next",
+    "object", "oct", "open", "ord", "pow", "print", "property", "quit",
+    "range", "repr", "reversed", "round", "set", "setattr", "slice", "sorted",
+    "staticmethod", "str", "sum", "super", "tuple", "type", "vars", "zip",
+];
+
 pub static SPECS: &[Spec] = &[
     Spec {
         name: "typescript",
@@ -99,6 +131,7 @@ pub static SPECS: &[Spec] = &[
         calls: &["call_expression"],
         null_check: Some(JS_NULL),
         ghost: Some(TS_GHOST),
+        undefined: None,
         formatter: JS_FORMAT,
     },
     Spec {
@@ -111,6 +144,7 @@ pub static SPECS: &[Spec] = &[
         calls: &["call_expression"],
         null_check: Some(JS_NULL),
         ghost: Some(TS_GHOST),
+        undefined: None,
         formatter: JS_FORMAT,
     },
     Spec {
@@ -123,6 +157,7 @@ pub static SPECS: &[Spec] = &[
         calls: &["call_expression"],
         null_check: Some(JS_NULL),
         ghost: None,
+        undefined: None,
         formatter: JS_FORMAT,
     },
     Spec {
@@ -152,6 +187,7 @@ pub static SPECS: &[Spec] = &[
             },
             heritage: |n| if n.kind() == "class_definition" { fields(n, &["superclasses"]) } else { Vec::new() },
         }),
+        undefined: Some(Undefined { builtins: PYTHON_BUILTINS, wildcard_import: "wildcard_import" }),
         formatter: &["ruff", "format"],
     },
     Spec {
@@ -167,6 +203,7 @@ pub static SPECS: &[Spec] = &[
             is_abstraction: |n, _| n.kind() == "trait_item",
             heritage: |n| if n.kind() == "impl_item" { fields(n, &["trait"]) } else { Vec::new() },
         }),
+        undefined: None,
         formatter: &["rustfmt", "--edition", "2024"],
     },
     Spec {
@@ -192,6 +229,7 @@ pub static SPECS: &[Spec] = &[
         }),
         // Go interfaces are satisfied implicitly, so implementors cannot be counted syntactically.
         ghost: None,
+        undefined: None,
         formatter: &["gofmt", "-w"],
     },
     Spec {
@@ -206,6 +244,7 @@ pub static SPECS: &[Spec] = &[
         // malloc and friends can return NULL, so no C value is known non-null.
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &["clang-format", "-i"],
     },
     Spec {
@@ -222,6 +261,7 @@ pub static SPECS: &[Spec] = &[
             non_null: |n, _| kind_in(&["new_expression", "string_literal", "lambda_expression"])(n),
         }),
         ghost: None,
+        undefined: None,
         formatter: &["clang-format", "-i"],
     },
     Spec {
@@ -246,6 +286,7 @@ pub static SPECS: &[Spec] = &[
             },
             heritage: |n| if n.kind() == "class_declaration" { fields(n, &["interfaces", "superclass"]) } else { Vec::new() },
         }),
+        undefined: None,
         formatter: &[],
     },
     Spec {
@@ -264,6 +305,7 @@ pub static SPECS: &[Spec] = &[
             },
             heritage: |n| if n.kind() == "class_declaration" { children_of_kind(n, &["base_list"]) } else { Vec::new() },
         }),
+        undefined: None,
         formatter: &[],
     },
     Spec {
@@ -276,6 +318,7 @@ pub static SPECS: &[Spec] = &[
         calls: &[],
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &["ktlint", "-F"],
     },
     Spec {
@@ -293,6 +336,7 @@ pub static SPECS: &[Spec] = &[
                 if n.kind() == "class_declaration" { children_of_kind(n, &["inheritance_specifier"]) } else { Vec::new() }
             },
         }),
+        undefined: None,
         formatter: &[],
     },
     Spec {
@@ -311,6 +355,7 @@ pub static SPECS: &[Spec] = &[
                 _ => Vec::new(),
             },
         }),
+        undefined: None,
         formatter: &[],
     },
     Spec {
@@ -323,6 +368,7 @@ pub static SPECS: &[Spec] = &[
         calls: &["call_expression"],
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &["dart", "format"],
     },
     Spec {
@@ -351,6 +397,7 @@ pub static SPECS: &[Spec] = &[
                 }
             },
         }),
+        undefined: None,
         formatter: &[],
     },
     Spec {
@@ -363,6 +410,7 @@ pub static SPECS: &[Spec] = &[
         calls: &["call"],
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &[],
     },
     Spec {
@@ -375,6 +423,7 @@ pub static SPECS: &[Spec] = &[
         calls: &["function_call"],
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &["stylua"],
     },
     Spec {
@@ -392,6 +441,7 @@ pub static SPECS: &[Spec] = &[
             non_null: |n, _| kind_in(&["array", "dictionary", "string", "integer", "float", "true", "false"])(n),
         }),
         ghost: None,
+        undefined: None,
         formatter: &["gdformat"],
     },
     Spec {
@@ -404,6 +454,7 @@ pub static SPECS: &[Spec] = &[
         calls: &[],
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &["shfmt", "-w"],
     },
     Spec {
@@ -416,6 +467,7 @@ pub static SPECS: &[Spec] = &[
         calls: &[],
         null_check: None,
         ghost: None,
+        undefined: None,
         formatter: &[],
     },
 ];

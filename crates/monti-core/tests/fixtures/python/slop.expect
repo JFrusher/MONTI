@@ -1,7 +1,12 @@
+3 undefined-name
 4 swallowed-error
 8 comment-flood
 14 pass-through-wrapper
 20 redundant-null-check
 26 comment-flood
 27 restating-comment
+33 undefined-name
 34 commented-error
+42 unused-parameter
+45 broad-except
+47 type-escape

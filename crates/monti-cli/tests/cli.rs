@@ -58,7 +58,7 @@ fn git(dir: &std::path::Path, args: &[&str]) {
     assert!(ok, "git {args:?}");
 }
 
-const SWALLOW: &str = "def f():\n    try:\n        go()\n    except E:\n        pass\n";
+const SWALLOW: &str = "def f():\n    try:\n        print()\n    except E:\n        pass\n";
 
 #[test]
 fn since_reports_only_changed_lines() {

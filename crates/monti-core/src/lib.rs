@@ -139,23 +139,29 @@ fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Findi
                 let mut hits = Vec::new();
                 while let Some(m) = matches.next() {
                     let node = m.captures().iter().map(|c| c.node).min_by_key(|n| n.start_byte()).unwrap();
-                    hits.push(Hit { node, fix: None });
+                    hits.push(Hit { node, fix: None, note: None });
                 }
                 hits
             }
             Check::MaxCommentCodeRatio(max) => metrics::functions(lang, root)
                 .into_iter()
                 .filter(|f| metrics::comment_code_ratio(*f, src) > *max)
-                .map(|node| Hit { node, fix: None })
+                .map(|node| Hit { node, fix: None, note: None })
                 .collect(),
             Check::PassThroughWrapper => detect::pass_through_wrappers(lang, root, src),
             Check::RedundantNullCheck => detect::redundant_null_checks(lang, root, src),
             Check::RestatingComment => detect::restating_comments(root, src),
+            Check::UndefinedName => detect::undefined_names(lang, root, src),
+            Check::UnusedParameter => detect::unused_parameters(lang, root, src),
             Check::DuplicateFunction { .. } | Check::GhostAbstraction => continue,
         };
         findings.extend(hits.into_iter().map(|h| {
             let p = h.node.start_position();
-            Finding::new(rule, p.row + 1, p.column + 1, rule.message.clone(), h.fix)
+            let message = match h.note {
+                Some(note) => format!("{} ({note})", rule.message),
+                None => rule.message.clone(),
+            };
+            Finding::new(rule, p.row + 1, p.column + 1, message, h.fix)
         }));
     }
     findings

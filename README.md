@@ -7,7 +7,7 @@ Dart, PHP, Ruby, Lua, GDScript, Bash, MATLAB. Adding one is a table entry plus t
 see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 It finds LLM "slop grenades" with Tree-sitter queries and AST metrics, no LLM involved:
-swallowed errors (empty handlers are errors, comment-only handlers are warnings), comment floods, comments that restate code, pass-through wrappers,
+swallowed errors (empty handlers are errors, comment-only handlers are warnings), silenced type checks (`as any`, bare `# type: ignore`), broad `except Exception`, calls to undefined names, unused parameters, comment floods, comments that restate code, pass-through wrappers,
 redundant null checks, structurally duplicated functions and single-use abstractions.
 
 ## CLI
@@ -59,6 +59,8 @@ language the check supports.
 | `check = "redundant-null-check"` | Null test right after a non-null assignment (languages with a `null_check` spec). Fixable. |
 | `check = "duplicate-function"` + `min_similarity` | Repo-wide Jaccard similarity of function-body AST shingles. Identifier names are ignored, literal values are not. |
 | `check = "ghost-abstraction"` | Interface / abstract class / trait / protocol with one implementor and at most one other use (languages with a `ghost` spec). |
+| `check = "undefined-name"` | Bare call to a name never defined, imported or builtin in the file (languages with an `undefined` spec: Python). Skipped with `import *`. |
+| `check = "unused-parameter"` | Free-function parameter never mentioned in the body. Skips methods, callbacks, decorated and test functions, stubs, `_names` and splats. |
 
 ```toml
 [rules.swallowed-error]

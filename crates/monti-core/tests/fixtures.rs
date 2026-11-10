@@ -24,7 +24,7 @@ fn ts() -> Language {
 fn empty_catches_are_errors_commented_ones_warnings() {
     let rules = parse_rules(DEFAULT_RULES).unwrap();
     let ids = |lang, src: &str| -> Vec<String> { scan(lang, src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
-    let try_except = |body: &str| format!("try:\n    go()\nexcept E:\n{body}\n");
+    let try_except = |body: &str| format!("try:\n    print()\nexcept E:\n{body}\n");
     assert_eq!(ids(py(), &try_except("    pass")), ["swallowed-error"]);
     assert_eq!(ids(py(), &try_except("    # deliberate\n    pass")), ["commented-error"]);
     assert_eq!(ids(py(), &try_except("    pass  # deliberate")), ["commented-error"]);
@@ -106,7 +106,7 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     // Same body shape, different data: not a copy. Same signature, stub body: not a copy.
     fs::write(
         dir.join("not_copies.py"),
-        "def test_interpolates():\n    assert sim_time(5, [(0, 100.0), (10, 200.0)]) == 150.0\n\n\ndef test_holds():\n    assert sim_time(20, [(0, 100.0), (10, 200.0)]) == 200.0\n\n\nclass Api(Protocol):\n    def messages(self, endpoint: str) -> list[dict[str, Any]]: ...\n    def patients(self, endpoint: str) -> list[dict[str, Any]]: ...\n",
+        "from timing import Any, Protocol, sim_time\n\n\ndef test_interpolates():\n    assert sim_time(5, [(0, 100.0), (10, 200.0)]) == 150.0\n\n\ndef test_holds():\n    assert sim_time(20, [(0, 100.0), (10, 200.0)]) == 200.0\n\n\nclass Api(Protocol):\n    def messages(self, endpoint: str) -> list[dict[str, Any]]: ...\n    def patients(self, endpoint: str) -> list[dict[str, Any]]: ...\n",
     )
     .unwrap();
     fs::write(dir.join("broken.py"), "ML unit tests.\n").unwrap();
@@ -163,7 +163,7 @@ fn syntax_errors_fail() {
 fn monti_ignore_comments_silence_findings() {
     let rules = parse_rules(DEFAULT_RULES).unwrap();
     let ids = |src: &str| -> Vec<String> { scan(py(), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
-    let swallow = |marker: &str| format!("try:\n    go()\nexcept E:  {marker}\n    pass\n");
+    let swallow = |marker: &str| format!("try:\n    print()\nexcept E:  {marker}\n    pass\n");
     assert_eq!(ids(&swallow("")), ["swallowed-error"]);
     assert_eq!(ids(&swallow("# monti-ignore")), Vec::<String>::new());
     assert_eq!(ids(&swallow("# monti-ignore: swallowed-error")), Vec::<String>::new());

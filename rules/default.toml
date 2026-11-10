@@ -205,6 +205,54 @@ lua = '''
   (#any-of? @f "pcall" "xpcall"))
 '''
 
+[rules.type-escape]
+severity = "warning"
+message = "Type or lint check silenced without naming what. Fix the type, or name the specific code."
+
+[rules.type-escape.queries]
+python = '''
+((comment) @c
+  (#match? @c "(type:\\s*ignore|noqa)\\s*$"))
+'''
+typescript = '''
+((predefined_type) @t (#eq? @t "any"))
+((comment) @c
+  (#match? @c "@ts-(ignore|nocheck)|eslint-disable(-next-line|-line)?\\s*(\\*/)?$"))
+'''
+tsx = '''
+((predefined_type) @t (#eq? @t "any"))
+((comment) @c
+  (#match? @c "@ts-(ignore|nocheck)|eslint-disable(-next-line|-line)?\\s*(\\*/)?$"))
+'''
+javascript = '''
+((comment) @c
+  (#match? @c "eslint-disable(-next-line|-line)?\\s*(\\*/)?$"))
+'''
+
+[rules.broad-except]
+severity = "warning"
+message = "Catches every exception and never re-raises. Catch the specific error you expect."
+
+[rules.broad-except.queries]
+python = '''
+((except_clause) @clause
+  (#match? @clause "^except(\\s+\\(?\\s*(Exception|BaseException)\\s*\\)?(\\s+as\\s+\\w+)?)?\\s*:")
+  (#not-match? @clause "\\braise\\b")
+  (#not-match? @clause "^[^:]*:(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$"))
+'''
+
+[rules.undefined-name]
+severity = "error"
+message = "Called name is never defined, imported, or a builtin; likely hallucinated."
+languages = ["*"]
+check = "undefined-name"
+
+[rules.unused-parameter]
+severity = "warning"
+message = "Parameter is never used."
+languages = ["*"]
+check = "unused-parameter"
+
 [rules.comment-flood]
 severity = "warning"
 message = "Comment-to-code ratio too high; comments likely restate the code."
