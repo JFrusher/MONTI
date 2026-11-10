@@ -116,7 +116,7 @@ Helix (`languages.toml`): `[language-server.monti] command = "monti"` with `args
 
 ```yaml
 - repo: https://github.com/JFrusher/MONTI
-  rev: v0.1.0
+  rev: v0.1.1
   hooks:
     - id: monti     # runs `monti scan --since HEAD`; needs monti installed
 ```
@@ -127,7 +127,7 @@ Helix (`languages.toml`): `[language-server.monti] command = "monti"` with `args
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0              # only needed for `since`
-- uses: JFrusher/MONTI@v0.1.0      # a release tag: the action downloads that release's binary
+- uses: JFrusher/MONTI@v0.1.1      # a release tag: the action downloads that release's binary
   with:
     path: .
     since: origin/${{ github.base_ref }}   # optional: gate only the PR's changes
