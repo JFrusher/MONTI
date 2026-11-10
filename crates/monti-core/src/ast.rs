@@ -118,8 +118,9 @@ pub fn parse(lang: Language, source: &str) -> Result<Tree> {
     let mut parser = Parser::new();
     parser.set_language(&lang.grammar())?;
     let tree = parser.parse(source, None).context("tree-sitter returned no tree")?;
-    if tree.root_node().has_error() {
-        bail!("{lang:?} source has syntax errors");
+    if let Some(bad) = descendants(tree.root_node()).into_iter().find(|n| n.is_error() || n.is_missing()) {
+        let p = bad.start_position();
+        bail!("{lang:?} syntax error at {}:{}", p.row + 1, p.column + 1);
     }
     Ok(tree)
 }

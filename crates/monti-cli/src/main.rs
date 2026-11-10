@@ -63,7 +63,8 @@ fn main() -> Result<ExitCode> {
 }
 
 fn scan(path: &Path) -> Result<ExitCode> {
-    let reports = scan_path(path, &rules::load(path)?)?;
+    let scan = scan_path(path, &rules::load(path)?)?;
+    let reports = &scan.files;
     let color = std::io::stdout().is_terminal();
     let paint = |code: &str, s: &str| if color { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() };
     let (mut errors, mut warnings) = (0, 0);
@@ -84,7 +85,10 @@ fn scan(path: &Path) -> Result<ExitCode> {
         }
         println!();
     }
-    println!("{} files scanned, {errors} errors, {warnings} warnings", reports.len());
+    for s in &scan.skipped {
+        println!("{}  {}", paint("2", &format!("skipped {}", s.path.display())), s.reason);
+    }
+    println!("{} files scanned, {} skipped, {errors} errors, {warnings} warnings", reports.len(), scan.skipped.len());
     Ok(if errors > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
@@ -96,7 +100,7 @@ struct Change {
 }
 
 fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Result<()> {
-    let reports = scan_path(path, &rules::load(path)?)?;
+    let reports = scan_path(path, &rules::load(path)?)?.files;
     let mut answers = std::io::stdin().lock().lines();
     let mut changes = Vec::new();
     for r in reports {

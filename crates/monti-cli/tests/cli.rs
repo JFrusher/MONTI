@@ -17,7 +17,7 @@ fn scan_reports_and_fails_on_errors() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert_eq!(out.status.code(), Some(1), "{stdout}");
     assert!(stdout.contains("swallowed-error"), "{stdout}");
-    assert!(stdout.contains("1 files scanned, 1 errors, 1 warnings"), "{stdout}");
+    assert!(stdout.contains("1 files scanned, 0 skipped, 1 errors, 1 warnings"), "{stdout}");
 }
 
 #[test]

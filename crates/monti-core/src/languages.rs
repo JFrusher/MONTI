@@ -196,7 +196,8 @@ pub static SPECS: &[Spec] = &[
     },
     Spec {
         name: "c",
-        extensions: &["c", "h"],
+        // `.h` is read as C++: its grammar also parses plain C headers, the reverse fails.
+        extensions: &["c"],
         grammar: || tree_sitter_c::LANGUAGE.into(),
         functions: &["function_definition"],
         methods: &[],
@@ -209,7 +210,7 @@ pub static SPECS: &[Spec] = &[
     },
     Spec {
         name: "cpp",
-        extensions: &["cpp", "cc", "cxx", "hpp", "hh", "hxx"],
+        extensions: &["cpp", "cc", "cxx", "h", "hpp", "hh", "hxx"],
         grammar: || tree_sitter_cpp::LANGUAGE.into(),
         functions: &["function_definition", "lambda_expression"],
         methods: &[],

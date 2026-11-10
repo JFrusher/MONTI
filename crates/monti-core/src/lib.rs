@@ -17,6 +17,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, QueryCursor};
 
@@ -129,21 +130,103 @@ pub fn source_files(root: &Path) -> Result<Vec<(PathBuf, Language)>> {
     Ok(out)
 }
 
+/// A file the scan could not analyse, and why.
+#[derive(Debug, Clone, Serialize)]
+pub struct Skipped {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+#[derive(Debug)]
+pub struct Scan {
+    pub files: Vec<FileReport>,
+    pub skipped: Vec<Skipped>,
+}
+
+pub(crate) struct Source {
+    pub path: PathBuf,
+    pub language: Language,
+    pub text: String,
+    pub tree: tree_sitter::Tree,
+}
+
+/// Reads and parses every supported file under `root`. Files that are not UTF-8, look minified,
+/// or do not parse are skipped with a reason: rules on an error-recovered tree produce noise, and
+/// grammars lag the languages, so one unparseable file must not stop the scan.
+pub(crate) fn load_sources(root: &Path) -> Result<(Vec<Source>, Vec<Skipped>)> {
+    let loaded = par_map(&source_files(root)?, |(path, language)| -> Result<Result<Source, Skipped>> {
+        let (path, language) = (path.clone(), *language);
+        let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        let parsed = String::from_utf8(bytes)
+            .map_err(|_| "not UTF-8".to_string())
+            .and_then(|text| if is_minified(&text) { Err("minified".to_string()) } else { Ok(text) })
+            .and_then(|text| match ast::parse(language, &text) {
+                Ok(tree) => Ok((text, tree)),
+                Err(e) => Err(format!("{e:#}")),
+            });
+        Ok(match parsed {
+            Ok((text, tree)) => Ok(Source { path, language, text, tree }),
+            Err(reason) => Err(Skipped { path, reason }),
+        })
+    });
+    let mut sources = Vec::new();
+    let mut skipped = Vec::new();
+    for item in loaded {
+        match item? {
+            Ok(source) => sources.push(source),
+            Err(skip) => skipped.push(skip),
+        }
+    }
+    Ok((sources, skipped))
+}
+
+/// `items.iter().map(f)` on all cores, results in input order.
+pub(crate) fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let mut done: Vec<(usize, R)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(i) else { return mine };
+                        mine.push((i, f(item)));
+                    }
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().expect("scan worker panicked")).collect()
+    });
+    done.sort_unstable_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, r)| r).collect()
+}
+
+/// Bundled or minified code averages hundreds of characters per line; hand-written code ~40.
+fn is_minified(text: &str) -> bool {
+    let lines = text.lines().filter(|l| !l.trim().is_empty()).count();
+    lines > 0 && text.len() / lines > 300
+}
+
 /// Scans every supported file under `root` with per-file and repo-wide rules.
-pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Vec<FileReport>> {
+pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
+    let (sources, skipped) = load_sources(root)?;
+    let analysed = par_map(&sources, |s| {
+        let root_node = s.tree.root_node();
+        let report = FileReport {
+            findings: scan_tree(s.language, root_node, &s.text, rules),
+            metrics: metrics::measure(root_node, &s.text),
+            path: s.path.clone(),
+            language: s.language,
+        };
+        (report, index::Index::of_file(&s.path, s.language, root_node, &s.text))
+    });
     let mut index = index::Index::default();
     let mut reports = Vec::new();
-    for (path, lang) in source_files(root)? {
-        let src = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-        let tree = ast::parse(lang, &src).with_context(|| path.display().to_string())?;
-        let root_node = tree.root_node();
-        index.add(&path, lang, root_node, &src);
-        reports.push(FileReport {
-            findings: scan_tree(lang, root_node, &src, rules),
-            metrics: metrics::measure(root_node, &src),
-            path,
-            language: lang,
-        });
+    for (report, part) in analysed {
+        reports.push(report);
+        index.merge(part);
     }
 
     let slot: HashMap<PathBuf, usize> = reports.iter().enumerate().map(|(i, r)| (r.path.clone(), i)).collect();
@@ -180,9 +263,9 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Vec<FileReport>> {
     }
 
     for r in &mut reports {
-        r.findings.sort_by(|a, b| (a.line, a.column, &a.rule_id).cmp(&(b.line, b.column, &b.rule_id)));
+        r.findings.sort_by(|a, b| (a.line, a.column, &a.rule_id, &a.message).cmp(&(b.line, b.column, &b.rule_id, &b.message)));
     }
-    Ok(reports)
+    Ok(Scan { files: reports, skipped })
 }
 
 /// Applies edits to `src`. An edit overlapping an earlier one is skipped; rerun to pick it up.
@@ -201,4 +284,13 @@ pub fn apply_fixes(src: &str, edits: &[&Edit]) -> String {
     }
     out.push_str(&src[pos..]);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn par_map_keeps_input_order() {
+        let items: Vec<u64> = (0..1000).collect();
+        assert_eq!(super::par_map(&items, |x| x * 2), items.iter().map(|x| x * 2).collect::<Vec<_>>());
+    }
 }

@@ -109,11 +109,20 @@ fn repo_scan_finds_duplicates_and_ghosts() {
         "def test_interpolates():\n    assert sim_time(5, [(0, 100.0), (10, 200.0)]) == 150.0\n\n\ndef test_holds():\n    assert sim_time(20, [(0, 100.0), (10, 200.0)]) == 200.0\n\n\nclass Api(Protocol):\n    def messages(self, endpoint: str) -> list[dict[str, Any]]: ...\n    def patients(self, endpoint: str) -> list[dict[str, Any]]: ...\n",
     )
     .unwrap();
+    fs::write(dir.join("broken.py"), "ML unit tests.\n").unwrap();
+    fs::write(dir.join("bundle.js"), format!("var a=1;{}\n", "f(a);".repeat(100))).unwrap();
     fs::write(dir.join(".montiignore"), "ignored/\n").unwrap();
     fs::create_dir(dir.join("ignored")).unwrap();
     fs::write(dir.join("ignored/x.py"), "def (:\n").unwrap();
 
-    let reports = scan_path(&dir, &parse_rules(DEFAULT_RULES).unwrap()).unwrap();
+    let scan = scan_path(&dir, &parse_rules(DEFAULT_RULES).unwrap()).unwrap();
+    let skipped: Vec<(String, String)> =
+        scan.skipped.iter().map(|s| (s.path.file_name().unwrap().to_string_lossy().into(), s.reason.clone())).collect();
+    assert_eq!(
+        skipped,
+        [("broken.py".into(), "python syntax error at 1:1".into()), ("bundle.js".into(), "minified".into())]
+    );
+    let reports = scan.files;
     let got: Vec<(String, String, usize)> = reports
         .iter()
         .flat_map(|r| {
