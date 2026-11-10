@@ -24,7 +24,7 @@ pub struct FnEntry {
     pub line: usize,
     pub column: usize,
     pub language: Language,
-    range: Range<usize>,
+    pub(crate) range: Range<usize>,
     size: usize,
     shingles: HashSet<u64>,
     signature: [u64; SIGNATURE],
@@ -60,6 +60,11 @@ impl Index {
         let mut index = Index::default();
         parts.into_iter().for_each(|p| index.merge(p));
         Ok(index)
+    }
+
+    /// How many name-like leaves (identifiers, type names) spell `name`, repo-wide.
+    pub fn occurrences(&self, name: &str) -> usize {
+        self.occurrences.get(name).copied().unwrap_or(0)
     }
 
     /// Merges another index (one file's, usually) into this one.
@@ -177,10 +182,10 @@ impl Index {
 }
 
 /// Leaf kinds that hold a type or symbol name, across grammars.
-const NAME_KINDS: &[&str] = &["identifier", "type_identifier", "name", "constant"];
+pub(crate) const NAME_KINDS: &[&str] = &["identifier", "type_identifier", "name", "constant"];
 
 /// The `name` field, or (C, C++, Dart) the name at the end of the declarator/signature chain.
-fn fn_name(f: Node, src: &str) -> String {
+pub(crate) fn fn_name(f: Node, src: &str) -> String {
     let mut n = f;
     for _ in 0..4 {
         if let Some(name) = n.child_by_field_name("name") {

@@ -13,7 +13,7 @@ use detect::Hit;
 use ignore::WalkBuilder;
 use metrics::Metrics;
 use rules::{Check, Rule, Severity};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +32,35 @@ pub struct Edit {
     pub replacement: String,
 }
 
+/// How much a fix may change. Each level includes the ones below it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FixLevel {
+    /// Cannot change behavior (deletes comments).
+    Safe,
+    /// Behavior-preserving rewrites backed by a local proof (a just-assigned value is not null).
+    Standard,
+    /// Deletes or renames functions; relies on the test suite `monti fix` runs.
+    Aggressive,
+}
+
+/// Edits to one file, applied together or not at all.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Fix {
+    pub level: FixLevel,
+    pub edits: Vec<Edit>,
+    /// `(name, n)`: valid only if `name` occurs exactly `n` times in the whole repo, i.e. nowhere
+    /// outside this file. Checked by [`scan_path`]; [`scan`] cannot, so it drops such fixes.
+    #[serde(skip)]
+    pub requires_local: Vec<(String, usize)>,
+}
+
+impl Fix {
+    pub fn new(level: FixLevel, edits: Vec<Edit>) -> Fix {
+        Fix { level, edits, requires_local: Vec::new() }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Finding {
     pub rule_id: String,
@@ -41,14 +70,14 @@ pub struct Finding {
     pub line: usize,
     /// 1-based.
     pub column: usize,
-    pub fix: Option<Edit>,
+    pub fix: Option<Fix>,
     /// Hash of the rule and the trimmed text of the finding's line: stable when code moves,
     /// so baselines and SARIF can track a finding across edits.
     pub fingerprint: String,
 }
 
 impl Finding {
-    fn new(rule: &Rule, line: usize, column: usize, message: String, fix: Option<Edit>) -> Finding {
+    fn new(rule: &Rule, line: usize, column: usize, message: String, fix: Option<Fix>) -> Finding {
         let rule_id = rule.id.clone();
         Finding { rule_id, severity: rule.severity, message, line, column, fix, fingerprint: String::new() }
     }
@@ -126,7 +155,12 @@ impl FileReport {
 /// (duplicates, ghost abstractions) need [`scan_path`].
 pub fn scan(lang: Language, source: &str, rules: &[Rule]) -> Result<Vec<Finding>> {
     let (analysed, tree) = parse_for_rules(lang, source)?;
-    Ok(finish(scan_tree(lang, tree.root_node(), &analysed, rules), source))
+    let mut findings = finish(scan_tree(lang, tree.root_node(), &analysed, rules), source);
+    // One file cannot prove a name is unused elsewhere.
+    for f in &mut findings {
+        f.fix = f.fix.take().filter(|fix| fix.requires_local.is_empty());
+    }
+    Ok(findings)
 }
 
 fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Finding> {
@@ -286,9 +320,10 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
     }
 
     let slot: HashMap<PathBuf, usize> = reports.iter().enumerate().map(|(i, r)| (r.path.clone(), i)).collect();
+    let by_path: HashMap<&Path, &Source> = sources.iter().map(|s| (s.path.as_path(), s)).collect();
     for rule in rules {
-        let mut push = |path: &Path, line, column, message| {
-            reports[slot[path]].findings.push(Finding::new(rule, line, column, message, None));
+        let mut push = |path: &Path, line, column, message, fix| {
+            reports[slot[path]].findings.push(Finding::new(rule, line, column, message, fix));
         };
         match rule.check {
             Check::DuplicateFunction { min_similarity } => {
@@ -305,13 +340,15 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
                             other.path.display(),
                             other.line
                         );
-                        push(&this.path, this.line, this.column, message);
+                        // Keep the first copy; the second gets the merge fix.
+                        let fix = if this.range == b.range && this.path == b.path { merge_fix(a, b, by_path[b.path.as_path()]) } else { None };
+                        push(&this.path, this.line, this.column, message, fix);
                     }
                 }
             }
             Check::GhostAbstraction => {
                 for g in index.ghosts().into_iter().filter(|g| rule.languages.contains(&g.language)) {
-                    push(&g.path, g.line, g.column, format!("{} (`{}`)", rule.message, g.name));
+                    push(&g.path, g.line, g.column, format!("{} (`{}`)", rule.message, g.name), None);
                 }
             }
             _ => {}
@@ -320,20 +357,50 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
 
     for (r, s) in reports.iter_mut().zip(&sources) {
         r.findings = finish(std::mem::take(&mut r.findings), &s.original);
+        for f in &mut r.findings {
+            f.fix = f.fix.take().filter(|fix| fix.requires_local.iter().all(|(name, n)| index.occurrences(name) == *n));
+        }
     }
     Ok(Scan { files: reports, skipped })
 }
 
-/// Applies edits to `src`. An edit overlapping an earlier one is skipped; rerun to pick it up.
-pub fn apply_fixes(src: &str, edits: &[&Edit]) -> String {
-    let mut edits = edits.to_vec();
-    edits.sort_by_key(|e| e.start);
+/// Aggressive fix for an exact same-file copy: delete `drop` and call `keep` instead. Only when
+/// bodies and parameter lists are identical text (whitespace aside) and both are top-level.
+fn merge_fix(keep: &index::FnEntry, drop: &index::FnEntry, src: &Source) -> Option<Fix> {
+    if keep.path != drop.path || keep.name == drop.name {
+        return None;
+    }
+    let root = src.tree.root_node();
+    let find = |e: &index::FnEntry| ast::descendants(root).into_iter().find(|n| n.byte_range() == e.range);
+    let (k, d) = (find(keep)?, find(drop)?);
+    let norm = |n: Option<Node>| n.map(|n| src.text[n.byte_range()].split_whitespace().collect::<Vec<_>>().join(" "));
+    let same = norm(k.child_by_field_name("body")) == norm(d.child_by_field_name("body"))
+        && norm(detect::parameter_list(k)) == norm(detect::parameter_list(d));
+    let keep_top_level = k.parent().is_some_and(|p| p == root || p.parent() == Some(root));
+    if !same || !keep_top_level {
+        return None;
+    }
+    let mut renames = detect::calls_only(src.language, root, d, &src.text)?;
+    renames.iter_mut().for_each(|e| e.replacement = keep.name.clone());
+    Some(detect::delete_function(d, &src.text, renames, drop.name.clone()))
+}
+
+/// Applies fixes to `src`. A fix with an edit overlapping an earlier fix's is skipped whole;
+/// rerun to pick it up.
+pub fn apply_fixes(src: &str, fixes: &[&Fix]) -> String {
+    let mut fixes = fixes.to_vec();
+    fixes.sort_by_key(|f| f.edits.iter().map(|e| e.start).min());
+    let mut taken: Vec<&Edit> = Vec::new();
+    for fix in fixes {
+        let overlaps = fix.edits.iter().any(|e| taken.iter().any(|t| e.start < t.end && t.start < e.end));
+        if !overlaps {
+            taken.extend(&fix.edits);
+        }
+    }
+    taken.sort_by_key(|e| e.start);
     let mut out = String::with_capacity(src.len());
     let mut pos = 0;
-    for e in edits {
-        if e.start < pos {
-            continue;
-        }
+    for e in taken {
         out.push_str(&src[pos..e.start]);
         out.push_str(&e.replacement);
         pos = e.end;

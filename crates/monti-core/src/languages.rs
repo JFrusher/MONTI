@@ -31,6 +31,9 @@ pub struct Spec {
     pub ghost: Option<Ghost>,
     /// Enables undefined-name (for dynamic languages, where calling an unknown name is a runtime error).
     pub undefined: Option<Undefined>,
+    /// True when a function cannot be referenced from outside its file (not exported, `_name`,
+    /// not `pub`, lowercase). Enables the aggressive fixes that delete or rename functions.
+    pub private: Option<fn(Node, &str) -> bool>,
     /// Formatter command `monti fix` runs on changed files (the path is appended). Empty: none.
     pub formatter: &'static [&'static str],
 }
@@ -132,6 +135,7 @@ pub static SPECS: &[Spec] = &[
         null_check: Some(JS_NULL),
         ghost: Some(TS_GHOST),
         undefined: None,
+        private: Some(|f, _| f.parent().is_none_or(|p| p.kind() != "export_statement")),
         formatter: JS_FORMAT,
     },
     Spec {
@@ -145,6 +149,7 @@ pub static SPECS: &[Spec] = &[
         null_check: Some(JS_NULL),
         ghost: Some(TS_GHOST),
         undefined: None,
+        private: Some(|f, _| f.parent().is_none_or(|p| p.kind() != "export_statement")),
         formatter: JS_FORMAT,
     },
     Spec {
@@ -158,6 +163,7 @@ pub static SPECS: &[Spec] = &[
         null_check: Some(JS_NULL),
         ghost: None,
         undefined: None,
+        private: Some(|f, _| f.parent().is_none_or(|p| p.kind() != "export_statement")),
         formatter: JS_FORMAT,
     },
     Spec {
@@ -188,6 +194,7 @@ pub static SPECS: &[Spec] = &[
             heritage: |n| if n.kind() == "class_definition" { fields(n, &["superclasses"]) } else { Vec::new() },
         }),
         undefined: Some(Undefined { builtins: PYTHON_BUILTINS, wildcard_import: "wildcard_import" }),
+        private: Some(|f, src| f.child_by_field_name("name").is_some_and(|n| { let name = &src[n.byte_range()]; name.starts_with('_') && !name.starts_with("__") })),
         formatter: &["ruff", "format"],
     },
     Spec {
@@ -204,6 +211,7 @@ pub static SPECS: &[Spec] = &[
             heritage: |n| if n.kind() == "impl_item" { fields(n, &["trait"]) } else { Vec::new() },
         }),
         undefined: None,
+        private: Some(|f, _| children_of_kind(f, &["visibility_modifier"]).is_empty()),
         formatter: &["rustfmt", "--edition", "2024"],
     },
     Spec {
@@ -230,6 +238,7 @@ pub static SPECS: &[Spec] = &[
         // Go interfaces are satisfied implicitly, so implementors cannot be counted syntactically.
         ghost: None,
         undefined: None,
+        private: Some(|f, src| f.child_by_field_name("name").is_some_and(|n| src[n.byte_range()].starts_with(|c: char| c.is_lowercase()))),
         formatter: &["gofmt", "-w"],
     },
     Spec {
@@ -245,6 +254,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["clang-format", "-i"],
     },
     Spec {
@@ -262,6 +272,7 @@ pub static SPECS: &[Spec] = &[
         }),
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["clang-format", "-i"],
     },
     Spec {
@@ -287,6 +298,7 @@ pub static SPECS: &[Spec] = &[
             heritage: |n| if n.kind() == "class_declaration" { fields(n, &["interfaces", "superclass"]) } else { Vec::new() },
         }),
         undefined: None,
+        private: None,
         formatter: &[],
     },
     Spec {
@@ -306,6 +318,7 @@ pub static SPECS: &[Spec] = &[
             heritage: |n| if n.kind() == "class_declaration" { children_of_kind(n, &["base_list"]) } else { Vec::new() },
         }),
         undefined: None,
+        private: None,
         formatter: &[],
     },
     Spec {
@@ -319,6 +332,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["ktlint", "-F"],
     },
     Spec {
@@ -337,6 +351,7 @@ pub static SPECS: &[Spec] = &[
             },
         }),
         undefined: None,
+        private: None,
         formatter: &[],
     },
     Spec {
@@ -356,6 +371,7 @@ pub static SPECS: &[Spec] = &[
             },
         }),
         undefined: None,
+        private: None,
         formatter: &[],
     },
     Spec {
@@ -369,6 +385,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["dart", "format"],
     },
     Spec {
@@ -398,6 +415,7 @@ pub static SPECS: &[Spec] = &[
             },
         }),
         undefined: None,
+        private: None,
         formatter: &[],
     },
     Spec {
@@ -411,6 +429,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &[],
     },
     Spec {
@@ -424,6 +443,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["stylua"],
     },
     Spec {
@@ -442,6 +462,7 @@ pub static SPECS: &[Spec] = &[
         }),
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["gdformat"],
     },
     Spec {
@@ -455,6 +476,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &["shfmt", "-w"],
     },
     Spec {
@@ -468,6 +490,7 @@ pub static SPECS: &[Spec] = &[
         null_check: None,
         ghost: None,
         undefined: None,
+        private: None,
         formatter: &[],
     },
 ];

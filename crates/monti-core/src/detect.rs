@@ -1,6 +1,7 @@
 //! Per-file detectors a Tree-sitter query cannot express.
 
-use crate::Edit;
+use crate::index::{NAME_KINDS, fn_name};
+use crate::{Edit, Fix, FixLevel};
 use crate::ast::{Language, descendants, is_comment, is_directive, last_row};
 use crate::languages::NullCheck;
 use crate::metrics::functions;
@@ -9,7 +10,7 @@ use tree_sitter::Node;
 
 pub struct Hit<'t> {
     pub node: Node<'t>,
-    pub fix: Option<Edit>,
+    pub fix: Option<Fix>,
     /// Appended to the rule message, e.g. which name.
     pub note: Option<String>,
 }
@@ -27,12 +28,59 @@ fn named(n: Node) -> Vec<Node> {
 // ---- pass-through wrappers -------------------------------------------------
 
 /// Free functions whose whole body is one call forwarding exactly their parameters, in order.
+/// Aggressive fix: call the target directly and delete the wrapper (see [`inline_wrapper`]).
 pub fn pass_through_wrappers<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
     functions(lang, root)
         .into_iter()
         .filter(|f| !is_method(lang, *f) && !is_callback(*f) && is_pass_through(lang, *f, src))
-        .map(|node| Hit { node, fix: None, note: None })
+        .map(|node| Hit { node, fix: inline_wrapper(lang, root, node, src), note: None })
         .collect()
+}
+
+/// Replaces every call of a private wrapper with its target and deletes it, when the wrapper is
+/// only ever called directly, has no defaults, and its target is not tied to `this`/`self`.
+fn inline_wrapper(lang: Language, root: Node, f: Node, src: &str) -> Option<Fix> {
+    let call = f.child_by_field_name("body").and_then(|b| single_call(lang, b))?;
+    let target = text(call.child_by_field_name("function")?, src);
+    let params = parameter_list(f)?;
+    if target.contains("this") || target.contains("self") || text(params, src).contains('=') {
+        return None;
+    }
+    let mut renames = calls_only(lang, root, f, src)?;
+    renames.iter_mut().for_each(|e| e.replacement = target.to_string());
+    Some(delete_function(f, src, renames, fn_name(f, src)))
+}
+
+/// Edits renaming every in-file use of `f`'s name (replacement left empty for the caller), or
+/// `None` unless `f` is private, top-level, and every other occurrence of its name is a direct call.
+pub(crate) fn calls_only(lang: Language, root: Node, f: Node, src: &str) -> Option<Vec<Edit>> {
+    let private = lang.spec().private?;
+    let name_node = f.child_by_field_name("name")?;
+    let top_level = f.parent().is_some_and(|p| p == root || p.parent() == Some(root));
+    if !private(f, src) || !top_level {
+        return None;
+    }
+    let name = text(name_node, src);
+    let mut edits = Vec::new();
+    for n in descendants(root).into_iter().filter(|n| NAME_KINDS.contains(&n.kind()) && text(*n, src) == name) {
+        if n == name_node {
+            continue;
+        }
+        let callee = n.parent().is_some_and(|p| lang.spec().calls.contains(&p.kind()) && p.child_by_field_name("function") == Some(n));
+        if !callee {
+            return None;
+        }
+        edits.push(Edit { start: n.start_byte(), end: n.end_byte(), replacement: String::new() });
+    }
+    Some(edits)
+}
+
+/// An aggressive fix deleting function `f` (whole lines) plus `others`, valid only while `name`
+/// occurs nowhere outside this file.
+pub(crate) fn delete_function(f: Node, src: &str, mut others: Vec<Edit>, name: String) -> Fix {
+    let uses = others.len() + 1;
+    others.push(delete_lines(f, f, src));
+    Fix { level: FixLevel::Aggressive, edits: others, requires_local: vec![(name, uses)] }
 }
 
 /// Methods may delegate to satisfy an interface or act as a facade.
@@ -87,7 +135,7 @@ fn single_call(lang: Language, mut n: Node) -> Option<Node> {
 }
 
 /// The parameter list: on the function itself, or (C, C++, Dart) on its declarator or signature.
-fn parameter_list(func: Node) -> Option<Node> {
+pub(crate) fn parameter_list(func: Node) -> Option<Node> {
     if let Some(p) = func.child_by_field_name("parameters").or_else(|| func.child_by_field_name("parameter")) {
         return Some(p);
     }
@@ -151,7 +199,7 @@ pub fn redundant_null_checks<'t>(lang: Language, root: Node<'t>, src: &str) -> V
         if !(check.non_null)(value, src) || !is_null_test(check, text(cond, src), name) {
             continue;
         }
-        let fix = if named(node).len() == 2 { unwrap_if(node, src) } else { None };
+        let fix = if named(node).len() == 2 { unwrap_if(node, src).map(|e| Fix::new(FixLevel::Standard, vec![e])) } else { None };
         hits.push(Hit { node, fix, note: None });
     }
     hits
@@ -326,7 +374,8 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
         if is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || !restates(comment, target, src) {
             continue;
         }
-        hits.push(Hit { node: first, fix: Some(delete_lines(first, last, src)), note: None });
+        let fix = Fix::new(FixLevel::Safe, vec![delete_lines(first, last, src)]);
+        hits.push(Hit { node: first, fix: Some(fix), note: None });
     }
     hits
 }

@@ -171,6 +171,30 @@ fn monti_ignore_comments_silence_findings() {
 }
 
 #[test]
+fn aggressive_fixes_inline_private_wrappers_and_merge_copies() {
+    let dir = temp_dir("aggressive");
+    let main = "import fhir\n\n\ndef _decode(content):\n    return fhir.decode(content)\n\n\ndef public_decode(content):\n    return fhir.decode(content)\n\n\ndef _with_default(a, b=1):\n    return fhir.pair(a, b)\n\n\ndef _total(xs):\n    t = 0\n    for x in xs:\n        if x > 0:\n            t += x * 2\n    return t\n\n\ndef _sum_pos(xs):\n    t = 0\n    for x in xs:\n        if x > 0:\n            t += x * 2\n    return t\n\n\ndef load(raw, xs):\n    return _decode(raw), _decode(raw), _with_default(raw), _total(xs), _sum_pos(xs)\n";
+    fs::write(dir.join("main.py"), main).unwrap();
+    fs::write(dir.join("api.ts"), "export function wrap(a: string) {\n  return send(a);\n}\n").unwrap();
+    let scan = scan_path(&dir, &parse_rules(DEFAULT_RULES).unwrap()).unwrap();
+    let fixes_in = |name: &str| -> Vec<(String, monti_core::Fix)> {
+        let r = scan.files.iter().find(|r| r.path.ends_with(name)).unwrap();
+        r.findings.iter().filter_map(|f| f.fix.clone().map(|x| (f.rule_id.clone(), x))).collect()
+    };
+    let main_fixes = fixes_in("main.py");
+    let rules: Vec<&str> = main_fixes.iter().map(|(r, _)| r.as_str()).collect();
+    assert_eq!(rules, ["pass-through-wrapper", "duplicate-function"], "public_decode, _with_default get none");
+    assert!(main_fixes.iter().all(|(_, f)| f.level == monti_core::FixLevel::Aggressive));
+    assert!(fixes_in("api.ts").is_empty(), "exported wrapper must not be inlined");
+
+    let fixed = apply_fixes(main, &main_fixes.iter().map(|(_, f)| f).collect::<Vec<_>>());
+    assert!(!fixed.contains("def _decode") && !fixed.contains(" _decode(") && !fixed.contains("_sum_pos"), "{fixed}");
+    assert!(fixed.contains("    return fhir.decode(raw), fhir.decode(raw), _with_default(raw), _total(xs), _total(xs)\n"), "{fixed}");
+    assert!(fixed.contains("def public_decode(content):"), "{fixed}");
+    ast::parse(py(), &fixed).unwrap();
+}
+
+#[test]
 fn bad_rules_fail_at_load() {
     let rule = |body: &str| format!("[rules.x]\nseverity = \"error\"\nmessage = \"m\"\n{body}");
     // Control: the shared header is valid, so each case below fails for its own reason.

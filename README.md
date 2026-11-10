@@ -19,13 +19,20 @@ monti scan [path]                 # findings + slop score per file; exit 1 on an
 monti scan --since origin/main    # only lines changed since a git ref (committed or not)
 monti scan --format sarif         # text | json | sarif | github
 monti baseline [path]             # accept today's findings (.monti-baseline.json); scan hides them
-monti fix [path] [--interactive]  # apply fixes, format, verify with the test suite
+monti fix [path] [--level L] [--interactive]  # apply fixes, format, verify with the test suite
 monti init [path]                 # write the default rules to monti.toml
 monti mcp                         # MCP server on stdio, rooted at the current directory
 ```
 
-`monti fix` applies the deterministic fixes (delete restating comments, unwrap redundant null
-checks). It then runs `prettier`, `ruff format`, `rustfmt` or `gofmt` on changed files
+`monti fix --level <level>` applies fixes up to that level:
+
+| Level | Applies |
+|---|---|
+| `safe` | Delete restating comments. Cannot change behavior. |
+| `standard` (default) | + Unwrap null checks on values just assigned a non-null value. |
+| `aggressive` | + Inline private pass-through wrappers at every call site and delete them; merge exact same-file copies of a function into one. Only for file-private functions whose name appears nowhere else in the repo and is only ever called directly. |
+
+Each fix's edits are applied together or not at all. It then runs `prettier`, `ruff format`, `rustfmt` or `gofmt` on changed files
 (`--no-format` skips), and runs the project's tests before and after (`cargo test`, `npm test`,
 `pytest`, `go test ./...`, picked from the nearest manifest; `--no-verify` skips). If formatting or
 tests fail after fixing, every file is restored.

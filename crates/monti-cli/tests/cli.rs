@@ -24,6 +24,10 @@ fn scan_reports_and_fails_on_errors() {
 fn fix_rewrites_and_init_writes_config() {
     let dir = temp_dir("fix");
     fs::write(dir.join("a.py"), SLOP).unwrap();
+    // `safe` only deletes comments; SLOP has none, so the null check survives.
+    let out = Command::new(MONTI).args(["fix", "--level", "safe", "--no-format", "--no-verify"]).arg(&dir).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("nothing to fix"));
+    assert_eq!(fs::read_to_string(dir.join("a.py")).unwrap(), SLOP);
     let out = Command::new(MONTI).args(["fix", "--no-format", "--no-verify"]).arg(&dir).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let fixed = fs::read_to_string(dir.join("a.py")).unwrap();

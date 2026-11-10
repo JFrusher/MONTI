@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use monti_core::ast::Language;
 use monti_core::rules::{self, CONFIG_FILE, DEFAULT_RULES};
-use monti_core::{Edit, apply_fixes, scan_path};
+use monti_core::{Fix, FixLevel, apply_fixes, scan_path};
 use std::fs;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -43,6 +43,10 @@ enum Cmd {
         /// Confirm each fix on stdin.
         #[arg(long)]
         interactive: bool,
+        /// safe: delete restating comments. standard: + unwrap redundant null checks.
+        /// aggressive: + inline private pass-through wrappers and merge exact same-file copies.
+        #[arg(long, value_enum, default_value = "standard")]
+        level: Level,
         /// Skip prettier / ruff / rustfmt / gofmt on changed files.
         #[arg(long)]
         no_format: bool,
@@ -70,8 +74,8 @@ fn main() -> Result<ExitCode> {
             println!("accepted {n} findings into {}", gate::root_dir(&path).join(gate::BASELINE_FILE).display());
             Ok(ExitCode::SUCCESS)
         }
-        Cmd::Fix { path, interactive, no_format, no_verify } => {
-            fix(&path, interactive, no_format, no_verify).map(|()| ExitCode::SUCCESS)
+        Cmd::Fix { path, interactive, level, no_format, no_verify } => {
+            fix(&path, interactive, level.into(), no_format, no_verify).map(|()| ExitCode::SUCCESS)
         }
         Cmd::Init { path } => init(&path).map(|()| ExitCode::SUCCESS),
         Cmd::Tree { file } => tree(&file).map(|()| ExitCode::SUCCESS),
@@ -101,26 +105,47 @@ struct Change {
     fixed: String,
 }
 
-fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Result<()> {
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum Level {
+    Safe,
+    Standard,
+    Aggressive,
+}
+
+impl From<Level> for FixLevel {
+    fn from(l: Level) -> FixLevel {
+        match l {
+            Level::Safe => FixLevel::Safe,
+            Level::Standard => FixLevel::Standard,
+            Level::Aggressive => FixLevel::Aggressive,
+        }
+    }
+}
+
+fn fix(path: &Path, interactive: bool, level: FixLevel, no_format: bool, no_verify: bool) -> Result<()> {
     let reports = scan_path(path, &rules::load(path)?)?.files;
     let mut answers = std::io::stdin().lock().lines();
     let mut changes = Vec::new();
     for r in reports {
         let original = fs::read_to_string(&r.path)?;
-        let mut accepted: Vec<&Edit> = Vec::new();
+        let mut accepted: Vec<&Fix> = Vec::new();
         for f in &r.findings {
-            let Some(edit) = &f.fix else { continue };
+            let Some(fix) = f.fix.as_ref().filter(|fix| fix.level <= level) else { continue };
             if interactive {
                 println!("{}:{}  [{}] {}", r.path.display(), f.line, f.rule_id, f.message);
-                original[edit.start..edit.end].lines().for_each(|l| println!("  - {l}"));
-                edit.replacement.lines().for_each(|l| println!("  + {l}"));
+                for e in &fix.edits {
+                    let line = original[..e.start].lines().count().max(1);
+                    println!("  @ line {line}");
+                    original[e.start..e.end].lines().for_each(|l| println!("  - {l}"));
+                    e.replacement.lines().for_each(|l| println!("  + {l}"));
+                }
                 print!("apply? [y/N] ");
                 std::io::stdout().flush()?;
                 if answers.next().context("stdin closed")??.trim() != "y" {
                     continue;
                 }
             }
-            accepted.push(edit);
+            accepted.push(fix);
         }
         if !accepted.is_empty() {
             let fixed = apply_fixes(&original, &accepted);
