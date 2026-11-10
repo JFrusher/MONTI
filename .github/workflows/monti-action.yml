@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --workspace
-      # Dogfood: block this repo's own PRs on error-severity slop.
-      - uses: ./
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      # Dogfood: annotate this repo's PRs and fail on error-severity slop.
+      - run: cargo run --release --locked -p monti-cli -- scan --format github .

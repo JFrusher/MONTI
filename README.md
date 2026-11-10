@@ -10,10 +10,14 @@ It finds LLM "slop grenades" with Tree-sitter queries and AST metrics, no LLM in
 swallowed errors (empty handlers are errors, comment-only handlers are warnings), silenced type checks (`as any`, bare `# type: ignore`), broad `except Exception`, calls to undefined names, unused parameters, comment floods, comments that restate code, pass-through wrappers,
 redundant null checks, structurally duplicated functions and single-use abstractions.
 
+## Install
+
+- Binaries for Linux, macOS and Windows: [releases](https://github.com/JFrusher/MONTI/releases).
+- From source: `cargo install --git https://github.com/JFrusher/MONTI monti-cli`.
+
 ## CLI
 
 ```sh
-cargo install --path crates/monti-cli
 
 monti scan [path]                 # findings + slop score per file; exit 1 on any error-severity finding
 monti scan --since origin/main    # only lines changed since a git ref (committed or not)
@@ -87,6 +91,29 @@ Add to Claude Code: `claude mcp add monti -- monti mcp`.
 
 - `monti_audit_file { path, content? }`: findings for a file or unsaved buffer.
 - `monti_find_duplicate_utils { code, language }`: existing functions with the same name or a similar structure.
+- `monti_repo_summary {}`: finding counts per rule and the worst files, to learn the codebase's habits.
+
+## Editors (LSP)
+
+`monti lsp` speaks the Language Server Protocol over stdio: findings show as diagnostics while you
+type, fixes as quick fixes. Neovim:
+
+```lua
+vim.lsp.config("monti", { cmd = { "monti", "lsp" }, filetypes = { "python", "typescript", "javascript", "rust", "go" }, root_markers = { ".git" } })
+vim.lsp.enable("monti")
+```
+
+Helix (`languages.toml`): `[language-server.monti] command = "monti"` with `args = ["lsp"]`, then add
+`"monti"` to a language's `language-servers`.
+
+## pre-commit
+
+```yaml
+- repo: https://github.com/JFrusher/MONTI
+  rev: v0.1.0
+  hooks:
+    - id: monti     # runs `monti scan --since HEAD`; needs monti installed
+```
 
 ## GitHub Action
 
@@ -94,7 +121,7 @@ Add to Claude Code: `claude mcp add monti -- monti mcp`.
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0              # only needed for `since`
-- uses: jfrusher/monti@main
+- uses: JFrusher/MONTI@v0.1.0      # a release tag: the action downloads that release's binary
   with:
     path: .
     since: origin/${{ github.base_ref }}   # optional: gate only the PR's changes

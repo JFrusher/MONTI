@@ -21,6 +21,8 @@ fn audit_and_duplicate_tools_over_stdio() {
     let root = common::temp_dir("mcp");
     fs::write(root.join("util.py"), "def clamp(value, low, high):\n    if value < low:\n        return low\n    if value > high:\n        return high\n    return value\n").unwrap();
 
+    fs::write(root.join("slop.py"), "try:\n    print()\nexcept E:\n    pass\n").unwrap();
+
     let call = |id: u64, name: &str, args: Value| {
         json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})
     };
@@ -34,13 +36,14 @@ fn audit_and_duplicate_tools_over_stdio() {
             call(4, "monti_find_duplicate_utils", json!({"language": "python", "code": "def bound(x, lo, hi):\n    if x < lo:\n        return lo\n    if x > hi:\n        return hi\n    return x\n"})),
             call(5, "monti_audit_file", json!({"path": "notes.txt"})),
             json!({"jsonrpc": "2.0", "id": 6, "method": "nope"}),
+            call(7, "monti_repo_summary", json!({})),
         ],
     );
 
-    assert_eq!(responses.len(), 6, "the notification must not be answered");
+    assert_eq!(responses.len(), 7, "the notification must not be answered");
     assert_eq!(responses[0]["result"]["serverInfo"]["name"], "monti");
     let names: Vec<&str> = responses[1]["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["monti_audit_file", "monti_find_duplicate_utils"]);
+    assert_eq!(names, ["monti_audit_file", "monti_repo_summary", "monti_find_duplicate_utils"]);
 
     let audit = tool_json(&responses[2]);
     assert_eq!(audit["findings"][0]["rule_id"], "swallowed-error");
@@ -52,4 +55,9 @@ fn audit_and_duplicate_tools_over_stdio() {
 
     assert_eq!(responses[4]["result"]["isError"], true);
     assert_eq!(responses[5]["error"]["code"], -32601);
+
+    let summary = tool_json(&responses[6]);
+    assert_eq!(summary["files_scanned"], 2);
+    assert_eq!(summary["findings_per_rule"]["swallowed-error"], 1);
+    assert_eq!(summary["worst_files"][0]["path"].as_str().unwrap().rsplit('/').next(), Some("slop.py"));
 }

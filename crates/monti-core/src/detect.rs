@@ -358,7 +358,14 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
         if !is_comment(last.kind()) || !own_line(last) {
             continue;
         }
-        let Some(target) = last.next_named_sibling() else { continue };
+        let Some(mut target) = last.next_named_sibling() else { continue };
+        // Some grammars (Python) hang a comment before a block's first statement outside the
+        // block: the statement below is the block's first child, not the whole block.
+        while matches!(target.kind(), "block" | "body" | "statement_block" | "compound_statement" | "statement_list")
+            && let Some(&first) = named(target).first()
+        {
+            target = first;
+        }
         if is_comment(target.kind()) || target.start_position().row != last_row(last) + 1 {
             continue;
         }

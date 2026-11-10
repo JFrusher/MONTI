@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 mod gate;
+mod lsp;
 mod output;
 
 #[derive(Parser)]
@@ -61,6 +62,8 @@ enum Cmd {
     },
     /// Serve MCP over stdio, rooted at the current directory.
     Mcp,
+    /// Serve the Language Server Protocol over stdio: findings as diagnostics, fixes as quick fixes.
+    Lsp,
     /// Print a file's syntax tree (node kinds and field names), for writing rules and language specs.
     Tree { file: PathBuf },
 }
@@ -78,6 +81,7 @@ fn main() -> Result<ExitCode> {
             fix(&path, interactive, level.into(), no_format, no_verify).map(|()| ExitCode::SUCCESS)
         }
         Cmd::Init { path } => init(&path).map(|()| ExitCode::SUCCESS),
+        Cmd::Lsp => lsp::serve(std::io::stdin().lock(), std::io::stdout().lock()).map(|()| ExitCode::SUCCESS),
         Cmd::Tree { file } => tree(&file).map(|()| ExitCode::SUCCESS),
         Cmd::Mcp => {
             let root = std::env::current_dir()?;
