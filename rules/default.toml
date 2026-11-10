@@ -1,3 +1,8 @@
+# MONTI rules. The table key is the rule id. Each rule sets exactly one of:
+#   tree_sitter_query       findings point at the earliest capture
+#   max_comment_code_ratio  per function
+#   check                   built-in detector (see README)
+
 [rules.swallowed-catch]
 severity = "error"
 message = "Empty catch block. Swallowing exceptions without handling is AI defensive slop."
@@ -17,8 +22,63 @@ tree_sitter_query = '''
   (block . (pass_statement) .) @block)
 '''
 
+[rules.swallowed-err-arm]
+severity = "error"
+message = "`Err(_) => {}` discards the error."
+languages = ["rust"]
+tree_sitter_query = '''
+(match_arm
+  pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
+  value: (block) @block
+  (#eq? @variant "Err")
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+
+[rules.swallowed-err-check]
+severity = "error"
+message = "`if err != nil {}` checks the error and then ignores it."
+languages = ["go"]
+tree_sitter_query = '''
+(if_statement
+  condition: (binary_expression left: (identifier) @err right: (nil))
+  consequence: (block) @block
+  (#eq? @err "err")
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+
 [rules.comment-flood]
 severity = "warning"
 message = "Comment-to-code ratio too high; comments likely restate the code."
-languages = ["typescript", "python"]
+languages = ["typescript", "python", "rust", "go"]
 max_comment_code_ratio = 0.35
+
+[rules.restating-comment]
+severity = "warning"
+message = "Comment restates the code below it."
+languages = ["typescript", "python", "rust", "go"]
+check = "restating-comment"
+
+[rules.pass-through-wrapper]
+severity = "warning"
+message = "Function only forwards its parameters to another call; call the target directly."
+languages = ["typescript", "python", "rust", "go"]
+check = "pass-through-wrapper"
+
+[rules.redundant-null-check]
+severity = "warning"
+message = "Null check on a value that was just assigned a non-null value."
+languages = ["typescript", "python", "go"]
+check = "redundant-null-check"
+
+[rules.duplicate-function]
+severity = "warning"
+message = "Structurally duplicates another function; reuse it."
+languages = ["typescript", "python", "rust", "go"]
+check = "duplicate-function"
+min_similarity = 0.85
+
+[rules.ghost-abstraction]
+severity = "warning"
+message = "Abstraction has a single implementor and at most one use; inline it."
+languages = ["typescript", "python", "rust"]
+check = "ghost-abstraction"

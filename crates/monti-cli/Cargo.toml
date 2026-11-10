@@ -1,0 +1,14 @@
+[package]
+name = "monti-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "monti"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+monti-core = { path = "../monti-core" }
+monti-mcp = { path = "../monti-mcp" }

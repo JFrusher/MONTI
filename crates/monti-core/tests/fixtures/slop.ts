@@ -17,3 +17,23 @@ export function setAge(user: { age: number }): void {
   // to twenty
   user.age = 20;
 }
+
+export function fetchUser(id: string, opts: object) {
+  return api.fetchUser(id, opts);
+}
+
+export function build(): Widget {
+  const w = new Widget();
+  if (w != null) {
+    w.init();
+  }
+  return w;
+}
+
+export class Person {
+  age = 0;
+  grow(): void {
+    // set age
+    this.age = 20;
+  }
+}

@@ -1,0 +1,14 @@
+name: monti
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # Dogfood: block this repo's own PRs on error-severity slop.
+      - uses: ./

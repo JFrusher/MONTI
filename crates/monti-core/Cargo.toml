@@ -5,9 +5,12 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+ignore = "0.4.34"
 serde = { version = "1.0.229", features = ["derive"] }
 streaming-iterator = "0.1.9"
 toml = "1.2.1"
 tree-sitter = "0.27.2"
+tree-sitter-go = "0.25.0"
 tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"

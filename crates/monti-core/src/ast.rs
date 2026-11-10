@@ -1,13 +1,15 @@
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tree_sitter::{Parser, Tree};
+use tree_sitter::{Node, Parser, Tree};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     TypeScript,
     Python,
+    Rust,
+    Go,
 }
 
 impl Language {
@@ -15,6 +17,8 @@ impl Language {
         match path.extension()?.to_str()? {
             "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "py" => Some(Language::Python),
+            "rs" => Some(Language::Rust),
+            "go" => Some(Language::Go),
             _ => None,
         }
     }
@@ -23,10 +27,12 @@ impl Language {
         match self {
             Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
         }
     }
 
-    /// Node kinds that count as a function body for per-function metrics.
+    /// Node kinds that count as a function for per-function checks.
     pub fn function_kinds(self) -> &'static [&'static str] {
         match self {
             Language::TypeScript => &[
@@ -37,6 +43,35 @@ impl Language {
                 "generator_function_declaration",
             ],
             Language::Python => &["function_definition"],
+            Language::Rust => &["function_item"],
+            Language::Go => &["function_declaration", "method_declaration", "func_literal"],
+        }
+    }
+}
+
+pub fn is_comment(kind: &str) -> bool {
+    matches!(kind, "comment" | "line_comment" | "block_comment")
+}
+
+/// Last row a node's text occupies. Some grammars end line comments after the newline.
+pub fn last_row(n: Node) -> usize {
+    let end = n.end_position();
+    if end.column == 0 && end.row > n.start_position().row { end.row - 1 } else { end.row }
+}
+
+/// `root` and everything below it, in pre-order.
+pub fn descendants(root: Node) -> Vec<Node> {
+    let mut out = Vec::new();
+    let mut cursor = root.walk();
+    loop {
+        out.push(cursor.node());
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return out;
+            }
         }
     }
 }

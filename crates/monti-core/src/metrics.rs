@@ -1,4 +1,4 @@
-use crate::ast::Language;
+use crate::ast::{Language, descendants, is_comment};
 use std::collections::BTreeSet;
 use tree_sitter::Node;
 
@@ -23,9 +23,9 @@ pub fn measure(node: Node) -> Metrics {
     while let Some((n, depth)) = stack.pop() {
         max_depth = max_depth.max(depth);
         let rows = n.start_position().row..=n.end_position().row;
-        if n.kind() == "comment" {
+        if is_comment(n.kind()) {
             comment_count += 1;
-            comments.extend(rows);
+            comments.extend(n.start_position().row..=crate::ast::last_row(n));
         } else if n.child_count() == 0 {
             code.extend(rows);
         } else {
@@ -50,14 +50,5 @@ pub fn comment_code_ratio(node: Node) -> f64 {
 /// Every function node under `root`, nested ones included.
 pub fn functions(lang: Language, root: Node) -> Vec<Node> {
     let kinds = lang.function_kinds();
-    let mut found = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        if kinds.contains(&n.kind()) {
-            found.push(n);
-        }
-        let mut cursor = n.walk();
-        stack.extend(n.children(&mut cursor));
-    }
-    found
+    descendants(root).into_iter().filter(|n| kinds.contains(&n.kind())).collect()
 }

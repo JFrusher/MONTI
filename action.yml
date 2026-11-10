@@ -1,0 +1,17 @@
+name: MONTI slop gate
+description: Fail the job when MONTI finds error-severity LLM slop.
+inputs:
+  path:
+    description: File or directory to scan.
+    default: "."
+runs:
+  using: composite
+  steps:
+    - name: Install monti
+      shell: bash
+      run: cargo install --locked --path "$GITHUB_ACTION_PATH/crates/monti-cli"
+    - name: Scan
+      shell: bash
+      env:
+        MONTI_PATH: ${{ inputs.path }}
+      run: monti scan "$MONTI_PATH"
