@@ -73,7 +73,7 @@ impl Index {
             });
         }
         for n in descendants(root) {
-            if n.child_count() == 0 && matches!(n.kind(), "identifier" | "type_identifier") {
+            if n.child_count() == 0 && NAME_KINDS.contains(&n.kind()) {
                 *self.occurrences.entry(src[n.byte_range()].to_string()).or_default() += 1;
             }
             if let Some(name) = abstraction_name(lang, n, src) {
@@ -143,8 +143,25 @@ impl Index {
     }
 }
 
+/// Leaf kinds that hold a type or symbol name, across grammars.
+const NAME_KINDS: &[&str] = &["identifier", "type_identifier", "name", "constant"];
+
+/// The `name` field, or (C, C++, Dart) the name at the end of the declarator/signature chain.
 fn fn_name(f: Node, src: &str) -> String {
-    f.child_by_field_name("name").map_or("<anonymous>".into(), |n| src[n.byte_range()].to_string())
+    let mut n = f;
+    for _ in 0..4 {
+        if let Some(name) = n.child_by_field_name("name") {
+            return src[name.byte_range()].to_string();
+        }
+        match n.child_by_field_name("declarator").or_else(|| n.child_by_field_name("signature")) {
+            Some(next) => n = next,
+            None => break,
+        }
+    }
+    if n != f && matches!(n.kind(), "identifier" | "field_identifier") {
+        return src[n.byte_range()].to_string();
+    }
+    "<anonymous>".into()
 }
 
 /// 3-grams of the function body's pre-order token sequence, plus the token count.
@@ -179,21 +196,8 @@ fn jaccard(a: &HashSet<u64>, b: &HashSet<u64>) -> f64 {
 }
 
 fn abstraction_name<'s>(lang: Language, n: Node, src: &'s str) -> Option<&'s str> {
-    let is_abstract = match lang {
-        Language::TypeScript | Language::Tsx => matches!(n.kind(), "interface_declaration" | "abstract_class_declaration"),
-        Language::Rust => n.kind() == "trait_item",
-        Language::Python => {
-            n.kind() == "class_definition"
-                && n.child_by_field_name("superclasses").is_some_and(|s| {
-                    s.utf8_text(src.as_bytes())
-                        .unwrap_or_default()
-                        .split(|c: char| !c.is_alphanumeric())
-                        .any(|t| matches!(t, "ABC" | "ABCMeta"))
-                })
-        }
-        Language::JavaScript | Language::Go => false,
-    };
-    if !is_abstract {
+    let ghost = lang.spec().ghost.as_ref()?;
+    if !(ghost.is_abstraction)(n, src) {
         return None;
     }
     n.child_by_field_name("name").map(|name| &src[name.byte_range()])
@@ -201,19 +205,11 @@ fn abstraction_name<'s>(lang: Language, n: Node, src: &'s str) -> Option<&'s str
 
 /// Names of the abstractions node `n` implements or extends.
 fn implemented<'s>(lang: Language, n: Node, src: &'s str) -> HashSet<&'s str> {
-    let heritage = match (lang, n.kind()) {
-        (Language::TypeScript | Language::Tsx, "class_declaration" | "abstract_class_declaration") => {
-            let mut cursor = n.walk();
-            n.children(&mut cursor).find(|c| c.kind() == "class_heritage")
-        }
-        (Language::Python, "class_definition") => n.child_by_field_name("superclasses"),
-        (Language::Rust, "impl_item") => n.child_by_field_name("trait"),
-        _ => None,
-    };
-    let Some(heritage) = heritage else { return HashSet::new() };
-    descendants(heritage)
+    let Some(ghost) = &lang.spec().ghost else { return HashSet::new() };
+    (ghost.heritage)(n)
         .into_iter()
-        .filter(|c| c.child_count() == 0 && matches!(c.kind(), "identifier" | "type_identifier"))
+        .flat_map(descendants)
+        .filter(|c| c.child_count() == 0 && NAME_KINDS.contains(&c.kind()))
         .map(|c| &src[c.byte_range()])
         .collect()
 }

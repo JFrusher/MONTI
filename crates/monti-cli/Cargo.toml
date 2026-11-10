@@ -2,6 +2,8 @@
 name = "monti-cli"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/JFrusher/MONTI"
 
 [[bin]]
 name = "monti"
@@ -12,3 +14,4 @@ anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 monti-core = { path = "../monti-core" }
 monti-mcp = { path = "../monti-mcp" }
+tree-sitter = "0.27"

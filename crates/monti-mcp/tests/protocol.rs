@@ -43,7 +43,7 @@ fn audit_and_duplicate_tools_over_stdio() {
     assert_eq!(names, ["monti_audit_file", "monti_find_duplicate_utils"]);
 
     let audit = tool_json(&responses[2]);
-    assert_eq!(audit["findings"][0]["rule_id"], "swallowed-except");
+    assert_eq!(audit["findings"][0]["rule_id"], "swallowed-error");
     assert_eq!(audit["findings"][0]["line"], 3);
 
     let dup = tool_json(&responses[3]);

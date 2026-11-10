@@ -1,57 +1,76 @@
+use crate::languages::{SPECS, Spec};
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use tree_sitter::{Node, Parser, Tree};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Language {
-    TypeScript,
-    Tsx,
-    JavaScript,
-    Python,
-    Rust,
-    Go,
-}
+/// A supported language: a handle into [`crate::languages::SPECS`].
+#[derive(Clone, Copy)]
+pub struct Language(&'static Spec);
 
 impl Language {
+    pub fn named(name: &str) -> Option<Language> {
+        SPECS.iter().find(|s| s.name == name).map(Language)
+    }
+
+    pub fn all() -> impl Iterator<Item = Language> {
+        SPECS.iter().map(Language)
+    }
+
     pub fn from_path(path: &Path) -> Option<Language> {
-        match path.extension()?.to_str()? {
-            "ts" | "mts" | "cts" => Some(Language::TypeScript),
-            "tsx" => Some(Language::Tsx),
-            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
-            "py" => Some(Language::Python),
-            "rs" => Some(Language::Rust),
-            "go" => Some(Language::Go),
-            _ => None,
-        }
+        let ext = path.extension()?.to_str()?;
+        SPECS.iter().find(|s| s.extensions.contains(&ext)).map(Language)
+    }
+
+    pub fn name(self) -> &'static str {
+        self.0.name
+    }
+
+    pub fn spec(self) -> &'static Spec {
+        self.0
     }
 
     pub fn grammar(self) -> tree_sitter::Language {
-        match self {
-            Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
-            Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
-            Language::Python => tree_sitter_python::LANGUAGE.into(),
-            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
-            Language::Go => tree_sitter_go::LANGUAGE.into(),
-        }
+        (self.0.grammar)()
     }
+}
 
-    /// Node kinds that count as a function for per-function checks.
-    pub fn function_kinds(self) -> &'static [&'static str] {
-        match self {
-            Language::TypeScript | Language::Tsx | Language::JavaScript => &[
-                "function_declaration",
-                "function_expression",
-                "arrow_function",
-                "method_definition",
-                "generator_function_declaration",
-            ],
-            Language::Python => &["function_definition"],
-            Language::Rust => &["function_item"],
-            Language::Go => &["function_declaration", "method_declaration", "func_literal"],
-        }
+impl PartialEq for Language {
+    fn eq(&self, other: &Language) -> bool {
+        self.0.name == other.0.name
+    }
+}
+
+impl Eq for Language {}
+
+impl Hash for Language {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.name.hash(state);
+    }
+}
+
+impl fmt::Debug for Language {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.0.name)
+    }
+}
+
+impl Serialize for Language {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.0.name)
+    }
+}
+
+impl<'de> Deserialize<'de> for Language {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Language, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        Language::named(&name).ok_or_else(|| {
+            let known: Vec<&str> = Language::all().map(Language::name).collect();
+            D::Error::custom(format!("unknown language `{name}`; known: {}", known.join(", ")))
+        })
     }
 }
 
@@ -66,8 +85,9 @@ pub fn is_directive(comment: &str) -> bool {
     DIRECTIVES.iter().any(|d| comment.contains(d))
 }
 
+/// Comment node kinds across all grammars. A new grammar with another spelling adds it here.
 pub fn is_comment(kind: &str) -> bool {
-    matches!(kind, "comment" | "line_comment" | "block_comment")
+    matches!(kind, "comment" | "line_comment" | "block_comment" | "multiline_comment" | "documentation_comment")
 }
 
 /// Last row a node's text occupies. Some grammars end line comments after the newline.

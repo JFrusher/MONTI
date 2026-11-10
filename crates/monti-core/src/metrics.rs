@@ -52,6 +52,6 @@ pub fn comment_code_ratio(node: Node, src: &str) -> f64 {
 
 /// Every function node under `root`, nested ones included.
 pub fn functions(lang: Language, root: Node) -> Vec<Node> {
-    let kinds = lang.function_kinds();
+    let kinds = lang.spec().functions;
     descendants(root).into_iter().filter(|n| kinds.contains(&n.kind())).collect()
 }

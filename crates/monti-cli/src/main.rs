@@ -43,6 +43,8 @@ enum Cmd {
     },
     /// Serve MCP over stdio, rooted at the current directory.
     Mcp,
+    /// Print a file's syntax tree (node kinds and field names), for writing rules and language specs.
+    Tree { file: PathBuf },
 }
 
 fn main() -> Result<ExitCode> {
@@ -52,6 +54,7 @@ fn main() -> Result<ExitCode> {
             fix(&path, interactive, no_format, no_verify).map(|()| ExitCode::SUCCESS)
         }
         Cmd::Init { path } => init(&path).map(|()| ExitCode::SUCCESS),
+        Cmd::Tree { file } => tree(&file).map(|()| ExitCode::SUCCESS),
         Cmd::Mcp => {
             let root = std::env::current_dir()?;
             monti_mcp::serve(&root, std::io::stdin().lock(), std::io::stdout().lock()).map(|()| ExitCode::SUCCESS)
@@ -129,8 +132,9 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
     }
     if !no_format {
         for c in &changes {
-            let bin = formatter(c.language)[0];
-            ensure!(on_path(bin), "formatter `{bin}` not found; install it or pass --no-format");
+            if let [bin, ..] = c.language.spec().formatter {
+                ensure!(on_path(bin), "formatter `{bin}` not found; install it or pass --no-format");
+            }
         }
     }
 
@@ -140,7 +144,8 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
     let outcome = (|| -> Result<()> {
         if !no_format {
             for c in &changes {
-                let [bin, args @ ..] = formatter(c.language) else { unreachable!() };
+                // Languages without a formatter in their spec are written as fixed.
+                let [bin, args @ ..] = c.language.spec().formatter else { continue };
                 ensure!(Command::new(bin).args(args).arg(&c.path).status()?.success(), "`{bin}` failed on {}", c.path.display());
             }
         }
@@ -159,15 +164,6 @@ fn fix(path: &Path, interactive: bool, no_format: bool, no_verify: bool) -> Resu
         println!("fixed {}", c.path.display());
     }
     Ok(())
-}
-
-fn formatter(lang: Language) -> &'static [&'static str] {
-    match lang {
-        Language::TypeScript | Language::Tsx | Language::JavaScript => &["prettier", "--write"],
-        Language::Python => &["ruff", "format"],
-        Language::Rust => &["rustfmt", "--edition", "2024"],
-        Language::Go => &["gofmt", "-w"],
-    }
 }
 
 fn on_path(bin: &str) -> bool {
@@ -200,6 +196,33 @@ fn test_suites(path: &Path) -> Result<Vec<(PathBuf, &'static [&'static str])>> {
 fn run(cmd: &[&str], dir: &Path) -> Result<bool> {
     let status = Command::new(cmd[0]).args(&cmd[1..]).current_dir(dir).status();
     Ok(status.with_context(|| format!("running `{}`", cmd.join(" ")))?.success())
+}
+
+fn tree(file: &Path) -> Result<()> {
+    let lang = Language::from_path(file).with_context(|| format!("unsupported file type: {}", file.display()))?;
+    let src = fs::read_to_string(file)?;
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&lang.grammar())?;
+    let tree = parser.parse(&src, None).context("tree-sitter returned no tree")?;
+    let mut cursor = tree.walk();
+    let mut depth = 0;
+    loop {
+        let node = cursor.node();
+        let field = cursor.field_name().map(|f| format!("{f}: ")).unwrap_or_default();
+        let kind = if node.is_named() { node.kind().to_string() } else { format!("{:?}", node.kind()) };
+        let leaf = if node.child_count() == 0 { format!("  {:?}", &src[node.byte_range()]) } else { String::new() };
+        println!("{:indent$}{field}{kind} [{}:{}]{leaf}", "", node.start_position().row + 1, node.start_position().column + 1, indent = depth * 2);
+        if cursor.goto_first_child() {
+            depth += 1;
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return Ok(());
+            }
+            depth -= 1;
+        }
+    }
 }
 
 fn init(dir: &Path) -> Result<()> {

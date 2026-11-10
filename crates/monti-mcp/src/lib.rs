@@ -60,7 +60,7 @@ fn tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "File path, relative to the workspace root or absolute. Its extension picks the language (.ts .tsx .js .jsx .mjs .cjs .py .rs .go)." },
+                    "path": { "type": "string", "description": "File path, relative to the workspace root or absolute. Its extension picks the language." },
                     "content": { "type": "string", "description": "Buffer contents to audit instead of the file on disk." }
                 },
                 "required": ["path"]
@@ -73,7 +73,7 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "code": { "type": "string", "description": "Source of the proposed function(s)." },
-                    "language": { "type": "string", "enum": ["typescript", "tsx", "javascript", "python", "rust", "go"] }
+                    "language": { "type": "string", "enum": Language::all().map(Language::name).collect::<Vec<_>>() }
                 },
                 "required": ["code", "language"]
             }

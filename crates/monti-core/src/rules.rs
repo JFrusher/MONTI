@@ -28,16 +28,13 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    fn languages(self) -> &'static [Language] {
-        use Language::*;
+    fn supports(self, lang: Language) -> bool {
+        let spec = lang.spec();
         match self {
-            Builtin::PassThroughWrapper | Builtin::RestatingComment | Builtin::DuplicateFunction => {
-                &[TypeScript, Tsx, JavaScript, Python, Rust, Go]
-            }
-            Builtin::RedundantNullCheck => &[TypeScript, Tsx, JavaScript, Python, Go],
-            // Go interfaces are satisfied implicitly, so implementors cannot be counted syntactically.
-            // JavaScript has no interfaces or abstract classes.
-            Builtin::GhostAbstraction => &[TypeScript, Tsx, Python, Rust],
+            Builtin::PassThroughWrapper => !spec.calls.is_empty(),
+            Builtin::RedundantNullCheck => spec.null_check.is_some(),
+            Builtin::GhostAbstraction => spec.ghost.is_some(),
+            Builtin::RestatingComment | Builtin::DuplicateFunction => true,
         }
     }
 }
@@ -77,8 +74,10 @@ struct RuleFile {
 struct RawRule {
     severity: Severity,
     message: String,
-    languages: Vec<Language>,
-    tree_sitter_query: Option<String>,
+    /// For `check` and `max_comment_code_ratio`: language names, or `["*"]` for all that the check supports.
+    languages: Option<Vec<String>>,
+    /// Query rules: one Tree-sitter query per language name. The keys are the rule's languages.
+    queries: Option<BTreeMap<String, String>>,
     max_comment_code_ratio: Option<f64>,
     check: Option<Builtin>,
     min_similarity: Option<f64>,
@@ -104,31 +103,35 @@ pub fn parse_rules(toml_src: &str) -> Result<Vec<Rule>> {
 }
 
 fn compile(id: String, raw: RawRule) -> Result<Rule> {
-    ensure!(!raw.languages.is_empty(), "rule `{id}`: `languages` is empty");
     ensure!(
         raw.min_similarity.is_none() || raw.check == Some(Builtin::DuplicateFunction),
         "rule `{id}`: `min_similarity` only applies to check = \"duplicate-function\""
     );
-    let check = match (raw.tree_sitter_query, raw.max_comment_code_ratio, raw.check) {
-        (Some(src), None, None) => {
+    let lookup = |name: &str| Language::named(name).with_context(|| format!("rule `{id}`: unknown language `{name}`"));
+    let (languages, check) = match (raw.queries, raw.max_comment_code_ratio, raw.check) {
+        (Some(sources), None, None) => {
+            ensure!(raw.languages.is_none(), "rule `{id}`: query rules take their languages from `queries`; drop `languages`");
+            ensure!(!sources.is_empty(), "rule `{id}`: `queries` is empty");
             let mut queries = HashMap::new();
-            for &lang in &raw.languages {
-                let query = Query::new(&lang.grammar(), &src)
-                    .with_context(|| format!("rule `{id}`: invalid query for {lang:?}"))?;
-                ensure!(!query.capture_names().is_empty(), "rule `{id}`: query has no capture to report");
+            for (name, src) in &sources {
+                let lang = lookup(name)?;
+                let query = Query::new(&lang.grammar(), src)
+                    .with_context(|| format!("rule `{id}`: invalid query for {name}"))?;
+                ensure!(!query.capture_names().is_empty(), "rule `{id}`: {name} query has no capture to report");
                 queries.insert(lang, query);
             }
-            Check::Query(queries)
+            (queries.keys().copied().collect(), Check::Query(queries))
         }
         (None, Some(max), None) => {
             ensure!(max >= 0.0, "rule `{id}`: max_comment_code_ratio must be >= 0");
-            Check::MaxCommentCodeRatio(max)
+            (languages(&id, raw.languages, |_| true)?, Check::MaxCommentCodeRatio(max))
         }
         (None, None, Some(builtin)) => {
-            for lang in &raw.languages {
-                ensure!(builtin.languages().contains(lang), "rule `{id}`: {builtin:?} does not support {lang:?}");
+            let languages = languages(&id, raw.languages, |l| builtin.supports(l))?;
+            for lang in &languages {
+                ensure!(builtin.supports(*lang), "rule `{id}`: {builtin:?} does not support {lang:?}");
             }
-            match builtin {
+            let check = match builtin {
                 Builtin::PassThroughWrapper => Check::PassThroughWrapper,
                 Builtin::RedundantNullCheck => Check::RedundantNullCheck,
                 Builtin::RestatingComment => Check::RestatingComment,
@@ -138,15 +141,29 @@ fn compile(id: String, raw: RawRule) -> Result<Rule> {
                     ensure!(min > 0.0 && min <= 1.0, "rule `{id}`: min_similarity must be in (0, 1]");
                     Check::DuplicateFunction { min_similarity: min }
                 }
-            }
+            };
+            (languages, check)
         }
-        _ => bail!("rule `{id}`: set exactly one of `tree_sitter_query`, `max_comment_code_ratio` or `check`"),
+        _ => bail!("rule `{id}`: set exactly one of `queries`, `max_comment_code_ratio` or `check`"),
     };
     Ok(Rule {
         id,
         severity: raw.severity,
         message: raw.message,
-        languages: raw.languages,
+        languages,
         check,
     })
+}
+
+/// Resolves `languages`; `["*"]` means every language for which `supported` holds.
+fn languages(id: &str, names: Option<Vec<String>>, supported: impl Fn(Language) -> bool) -> Result<Vec<Language>> {
+    let names = names.with_context(|| format!("rule `{id}`: needs `languages`"))?;
+    ensure!(!names.is_empty(), "rule `{id}`: `languages` is empty");
+    if names == ["*"] {
+        return Ok(Language::all().filter(|l| supported(*l)).collect());
+    }
+    names
+        .iter()
+        .map(|n| Language::named(n).with_context(|| format!("rule `{id}`: unknown language `{n}`")))
+        .collect()
 }

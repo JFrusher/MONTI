@@ -16,7 +16,7 @@ fn scan_reports_and_fails_on_errors() {
     let out = Command::new(MONTI).arg("scan").arg(&dir).output().unwrap();
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert_eq!(out.status.code(), Some(1), "{stdout}");
-    assert!(stdout.contains("swallowed-except"), "{stdout}");
+    assert!(stdout.contains("swallowed-error"), "{stdout}");
     assert!(stdout.contains("1 files scanned, 1 errors, 1 warnings"), "{stdout}");
 }
 
@@ -33,7 +33,7 @@ fn fix_rewrites_and_init_writes_config() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("nothing to fix"));
 
     assert!(Command::new(MONTI).arg("init").arg(&dir).status().unwrap().success());
-    assert!(fs::read_to_string(dir.join("monti.toml")).unwrap().contains("[rules.swallowed-catch]"));
+    assert!(fs::read_to_string(dir.join("monti.toml")).unwrap().contains("[rules.swallowed-error]"));
     assert!(!Command::new(MONTI).arg("init").arg(&dir).status().unwrap().success(), "init must not overwrite");
 }
 

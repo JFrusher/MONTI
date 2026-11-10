@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod detect;
 pub mod index;
+pub mod languages;
 pub mod metrics;
 pub mod rules;
 
