@@ -42,12 +42,61 @@ pub struct Finding {
     /// 1-based.
     pub column: usize,
     pub fix: Option<Edit>,
+    /// Hash of the rule and the trimmed text of the finding's line: stable when code moves,
+    /// so baselines and SARIF can track a finding across edits.
+    pub fingerprint: String,
 }
 
 impl Finding {
     fn new(rule: &Rule, line: usize, column: usize, message: String, fix: Option<Edit>) -> Finding {
-        Finding { rule_id: rule.id.clone(), severity: rule.severity, message, line, column, fix }
+        let rule_id = rule.id.clone();
+        Finding { rule_id, severity: rule.severity, message, line, column, fix, fingerprint: String::new() }
     }
+}
+
+/// Sets fingerprints, drops findings silenced by a `monti-ignore` comment, and sorts.
+fn finish(mut findings: Vec<Finding>, src: &str) -> Vec<Finding> {
+    let lines: Vec<&str> = src.lines().collect();
+    findings.retain(|f| !ignored(f, &lines));
+    for f in &mut findings {
+        let text = lines.get(f.line - 1).map_or("", |l| l.trim());
+        f.fingerprint = format!("{:016x}", index::hash((&f.rule_id, text)));
+    }
+    findings.sort_by(|a, b| (a.line, a.column, &a.rule_id, &a.message).cmp(&(b.line, b.column, &b.rule_id, &b.message)));
+    findings
+}
+
+const MARK: &str = "monti-ignore";
+
+/// Parses `text` for analysis. Comments holding `monti-ignore` are blanked to spaces first (byte
+/// offsets unchanged) so rules never see them: a marker inside an empty error handler must not make
+/// it a "commented" handler. Returns the analysed text and its tree.
+fn parse_for_rules(lang: Language, text: &str) -> Result<(String, tree_sitter::Tree)> {
+    let tree = ast::parse(lang, text)?;
+    if !text.contains(MARK) {
+        return Ok((text.to_string(), tree));
+    }
+    let mut bytes = text.as_bytes().to_vec();
+    for n in ast::descendants(tree.root_node()) {
+        if ast::is_comment(n.kind()) && text[n.byte_range()].contains(MARK) {
+            bytes[n.byte_range()].iter_mut().filter(|b| **b != b'\n').for_each(|b| *b = b' ');
+        }
+    }
+    let masked = String::from_utf8(bytes).expect("whole UTF-8 sequences were replaced by ASCII spaces");
+    let tree = ast::parse(lang, &masked)?;
+    Ok((masked, tree))
+}
+
+/// `monti-ignore` (every rule) or `monti-ignore: rule-a, rule-b`, on the finding's line or the line above.
+fn ignored(f: &Finding, lines: &[&str]) -> bool {
+    let here = f.line - 1;
+    [here.checked_sub(1), Some(here)].into_iter().flatten().filter_map(|i| lines.get(i)).any(|line| {
+        let Some(at) = line.find(MARK) else { return false };
+        match line[at + MARK.len()..].strip_prefix(':') {
+            None => true,
+            Some(ids) => ids.split(|c: char| c == ',' || c.is_whitespace()).any(|id| id == f.rule_id),
+        }
+    })
 }
 
 #[derive(Debug)]
@@ -76,10 +125,8 @@ impl FileReport {
 /// Runs the per-file rules that apply to `lang` against `source`. Repo-wide rules
 /// (duplicates, ghost abstractions) need [`scan_path`].
 pub fn scan(lang: Language, source: &str, rules: &[Rule]) -> Result<Vec<Finding>> {
-    let tree = ast::parse(lang, source)?;
-    let mut findings = scan_tree(lang, tree.root_node(), source, rules);
-    findings.sort_by_key(|f| (f.line, f.column));
-    Ok(findings)
+    let (analysed, tree) = parse_for_rules(lang, source)?;
+    Ok(finish(scan_tree(lang, tree.root_node(), &analysed, rules), source))
 }
 
 fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Finding> {
@@ -146,7 +193,10 @@ pub struct Scan {
 pub(crate) struct Source {
     pub path: PathBuf,
     pub language: Language,
+    /// The file as rules see it (`monti-ignore` comments blanked).
     pub text: String,
+    /// The file as written, for ignore markers and fingerprints.
+    pub original: String,
     pub tree: tree_sitter::Tree,
 }
 
@@ -160,12 +210,12 @@ pub(crate) fn load_sources(root: &Path) -> Result<(Vec<Source>, Vec<Skipped>)> {
         let parsed = String::from_utf8(bytes)
             .map_err(|_| "not UTF-8".to_string())
             .and_then(|text| if is_minified(&text) { Err("minified".to_string()) } else { Ok(text) })
-            .and_then(|text| match ast::parse(language, &text) {
-                Ok(tree) => Ok((text, tree)),
+            .and_then(|original| match parse_for_rules(language, &original) {
+                Ok((text, tree)) => Ok((original, text, tree)),
                 Err(e) => Err(format!("{e:#}")),
             });
         Ok(match parsed {
-            Ok((text, tree)) => Ok(Source { path, language, text, tree }),
+            Ok((original, text, tree)) => Ok(Source { path, language, text, original, tree }),
             Err(reason) => Err(Skipped { path, reason }),
         })
     });
@@ -262,8 +312,8 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Scan> {
         }
     }
 
-    for r in &mut reports {
-        r.findings.sort_by(|a, b| (a.line, a.column, &a.rule_id, &a.message).cmp(&(b.line, b.column, &b.rule_id, &b.message)));
+    for (r, s) in reports.iter_mut().zip(&sources) {
+        r.findings = finish(std::mem::take(&mut r.findings), &s.original);
     }
     Ok(Scan { files: reports, skipped })
 }

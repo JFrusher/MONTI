@@ -1,12 +1,15 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use monti_core::ast::Language;
-use monti_core::rules::{self, CONFIG_FILE, DEFAULT_RULES, Severity};
+use monti_core::rules::{self, CONFIG_FILE, DEFAULT_RULES};
 use monti_core::{Edit, apply_fixes, scan_path};
 use std::fs;
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+mod gate;
+mod output;
 
 #[derive(Parser)]
 #[command(name = "monti", version, about = "Deterministic anti-slop code sweeper")]
@@ -17,8 +20,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Report findings and per-file slop scores. Exits 1 when any error-severity finding exists.
+    /// Report findings and per-file slop scores. Exits 1 when any error-severity finding remains
+    /// after `--since`, the baseline file and `monti-ignore` comments.
     Scan {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        #[arg(long, value_enum, default_value = "text")]
+        format: output::Format,
+        /// Only report findings on lines changed since this git ref (e.g. `origin/main`, `HEAD`).
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Accept every current finding: write them to .monti-baseline.json, which `scan` then hides.
+    Baseline {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -49,7 +63,13 @@ enum Cmd {
 
 fn main() -> Result<ExitCode> {
     match Cli::parse().command {
-        Cmd::Scan { path } => scan(&path),
+        Cmd::Scan { path, format, since } => scan(&path, format, since.as_deref()),
+        Cmd::Baseline { path } => {
+            let files = scan_path(&path, &rules::load(&path)?)?.files;
+            let n = gate::write_baseline(gate::root_dir(&path), &files)?;
+            println!("accepted {n} findings into {}", gate::root_dir(&path).join(gate::BASELINE_FILE).display());
+            Ok(ExitCode::SUCCESS)
+        }
         Cmd::Fix { path, interactive, no_format, no_verify } => {
             fix(&path, interactive, no_format, no_verify).map(|()| ExitCode::SUCCESS)
         }
@@ -62,34 +82,16 @@ fn main() -> Result<ExitCode> {
     }
 }
 
-fn scan(path: &Path) -> Result<ExitCode> {
-    let scan = scan_path(path, &rules::load(path)?)?;
-    let reports = &scan.files;
-    let color = std::io::stdout().is_terminal();
-    let paint = |code: &str, s: &str| if color { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() };
-    let (mut errors, mut warnings) = (0, 0);
-    for r in reports.iter().filter(|r| !r.findings.is_empty()) {
-        println!("{}  slop score {:.1}", paint("1", &r.path.display().to_string()), r.slop_score());
-        for f in &r.findings {
-            let severity = match f.severity {
-                Severity::Error => {
-                    errors += 1;
-                    paint("31", "error  ")
-                }
-                Severity::Warning => {
-                    warnings += 1;
-                    paint("33", "warning")
-                }
-            };
-            println!("  {:>5}:{:<4} {severity}  {:<22} {}", f.line, f.column, f.rule_id, f.message);
-        }
-        println!();
+fn scan(path: &Path, format: output::Format, since: Option<&str>) -> Result<ExitCode> {
+    let rules = rules::load(path)?;
+    let mut scan = scan_path(path, &rules)?;
+    let root = gate::root_dir(path);
+    if let Some(base) = since {
+        gate::keep_changed(root, base, &mut scan.files)?;
     }
-    for s in &scan.skipped {
-        println!("{}  {}", paint("2", &format!("skipped {}", s.path.display())), s.reason);
-    }
-    println!("{} files scanned, {} skipped, {errors} errors, {warnings} warnings", reports.len(), scan.skipped.len());
-    Ok(if errors > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    gate::apply_baseline(root, &mut scan.files)?;
+    print!("{}", output::render(format, &scan, &rules));
+    Ok(if output::has_errors(&scan) { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 struct Change {

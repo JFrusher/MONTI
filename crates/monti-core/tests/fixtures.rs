@@ -160,6 +160,17 @@ fn syntax_errors_fail() {
 }
 
 #[test]
+fn monti_ignore_comments_silence_findings() {
+    let rules = parse_rules(DEFAULT_RULES).unwrap();
+    let ids = |src: &str| -> Vec<String> { scan(py(), src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
+    let swallow = |marker: &str| format!("try:\n    go()\nexcept E:  {marker}\n    pass\n");
+    assert_eq!(ids(&swallow("")), ["swallowed-error"]);
+    assert_eq!(ids(&swallow("# monti-ignore")), Vec::<String>::new());
+    assert_eq!(ids(&swallow("# monti-ignore: swallowed-error")), Vec::<String>::new());
+    assert_eq!(ids(&swallow("# monti-ignore: comment-flood")), ["swallowed-error"]);
+}
+
+#[test]
 fn bad_rules_fail_at_load() {
     let rule = |body: &str| format!("[rules.x]\nseverity = \"error\"\nmessage = \"m\"\n{body}");
     // Control: the shared header is valid, so each case below fails for its own reason.

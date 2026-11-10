@@ -77,7 +77,7 @@ impl<'de> Deserialize<'de> for Language {
 // shortcut: fixed list of tool directives; extend when one is treated as prose.
 const DIRECTIVES: &[&str] = &[
     "#!", "go:", "+build", "eslint", "@ts-", "prettier-", "noqa", "type:", "pylint", "pragma", "nolint", "clippy",
-    "istanbul",
+    "istanbul", "monti-ignore",
 ];
 
 /// Comments addressed to tools (`# type: ignore`, `// eslint-disable`), not to readers.

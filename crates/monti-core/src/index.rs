@@ -235,7 +235,7 @@ fn mix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-fn hash(value: impl Hash) -> u64 {
+pub(crate) fn hash(value: impl Hash) -> u64 {
     let mut h = DefaultHasher::new();
     value.hash(&mut h);
     h.finish()

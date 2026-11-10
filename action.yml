@@ -4,6 +4,9 @@ inputs:
   path:
     description: File or directory to scan.
     default: "."
+  since:
+    description: Only report findings on lines changed since this git ref (e.g. origin/main). Needs fetch-depth 0.
+    default: ""
 runs:
   using: composite
   steps:
@@ -14,4 +17,5 @@ runs:
       shell: bash
       env:
         MONTI_PATH: ${{ inputs.path }}
-      run: monti scan "$MONTI_PATH"
+        MONTI_SINCE: ${{ inputs.since }}
+      run: monti scan --format github ${MONTI_SINCE:+--since "$MONTI_SINCE"} "$MONTI_PATH"

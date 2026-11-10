@@ -259,6 +259,8 @@ dependencies = [
  "clap",
  "monti-core",
  "monti-mcp",
+ "serde",
+ "serde_json",
  "tree-sitter",
 ]
 

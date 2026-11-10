@@ -16,6 +16,9 @@ redundant null checks, structurally duplicated functions and single-use abstract
 cargo install --path crates/monti-cli
 
 monti scan [path]                 # findings + slop score per file; exit 1 on any error-severity finding
+monti scan --since origin/main    # only lines changed since a git ref (committed or not)
+monti scan --format sarif         # text | json | sarif | github
+monti baseline [path]             # accept today's findings (.monti-baseline.json); scan hides them
 monti fix [path] [--interactive]  # apply fixes, format, verify with the test suite
 monti init [path]                 # write the default rules to monti.toml
 monti mcp                         # MCP server on stdio, rooted at the current directory
@@ -28,6 +31,15 @@ checks). It then runs `prettier`, `ruff format`, `rustfmt` or `gofmt` on changed
 tests fail after fixing, every file is restored.
 
 Slop score = (3 × errors + warnings) per 100 code lines.
+
+### Adopting on an existing codebase
+
+- `monti baseline` records every current finding in `.monti-baseline.json`; commit it. Later scans
+  hide those and report only new slop. Entries match on rule + the line's text, so moved code stays
+  accepted; edited code shows up again.
+- `monti scan --since origin/main` reports only lines changed on the branch.
+- Silence one spot with a comment on the line or the line above: `monti-ignore` (all rules) or
+  `monti-ignore: swallowed-error, comment-flood`. Rules never see these comments.
 
 Paths in `.gitignore` and `.montiignore` (same syntax) are skipped. Files with syntax errors stop the
 scan with the path; exclude them in `.montiignore`.
@@ -71,12 +83,17 @@ Add to Claude Code: `claude mcp add monti -- monti mcp`.
 
 ```yaml
 - uses: actions/checkout@v4
+  with:
+    fetch-depth: 0              # only needed for `since`
 - uses: jfrusher/monti@main
   with:
     path: .
+    since: origin/${{ github.base_ref }}   # optional: gate only the PR's changes
 ```
 
-Fails the job when any error-severity finding exists.
+Findings appear as annotations on the PR's lines. The job fails when any error-severity finding
+remains. For GitHub code scanning, run `monti scan --format sarif > monti.sarif` and upload it with
+`github/codeql-action/upload-sarif`.
 
 ## Layout
 
