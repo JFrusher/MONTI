@@ -1,5 +1,9 @@
 name: MONTI slop gate
 description: Annotate a PR with LLM slop findings and fail on error-severity ones.
+author: JFrusher
+branding:
+  icon: shield
+  color: red
 inputs:
   path:
     description: File or directory to scan.
@@ -28,7 +32,7 @@ runs:
         dir="$RUNNER_TEMP/monti"
         mkdir -p "$dir"
         gh release download "$MONTI_REF" --repo "$MONTI_REPO" --pattern "monti-$target.tar.gz" --dir "$dir" \
-          || { echo "::error::No monti release '$MONTI_REF'. Pin the action to a release tag, e.g. $MONTI_REPO@v0.1.0"; exit 1; }
+          || { echo "::error::No monti release '$MONTI_REF'. Pin the action to a release tag, e.g. $MONTI_REPO@v0.1.1"; exit 1; }
         tar -xzf "$dir/monti-$target.tar.gz" -C "$dir"
         echo "$dir" >> "$GITHUB_PATH"
     - name: Scan
