@@ -3,7 +3,7 @@
 Deterministic anti-slop code sweeper for TypeScript, TSX, JavaScript (.js .jsx .mjs .cjs), Python, Rust and Go. Named for MSG Jared C. Monti.
 
 It finds LLM "slop grenades" with Tree-sitter queries and AST metrics, no LLM involved:
-swallowed errors, comment floods, comments that restate code, pass-through wrappers,
+swallowed errors (empty handlers are errors, comment-only handlers are warnings), comment floods, comments that restate code, pass-through wrappers,
 redundant null checks, structurally duplicated functions and single-use abstractions.
 
 ## CLI
@@ -36,11 +36,11 @@ The table key is the rule id. Each rule sets exactly one check:
 | Field | Meaning |
 |---|---|
 | `tree_sitter_query` | Finding at the earliest capture. Compiled at load; a bad query is an error. |
-| `max_comment_code_ratio` | Comment lines / code lines per function. |
+| `max_comment_code_ratio` | Comment-only lines / code lines per function. Trailing comments and tool directives (`# type: ignore`) do not count. |
 | `check = "restating-comment"` | Own-line comment whose words cover every identifier of the next statement. Fixable. |
-| `check = "pass-through-wrapper"` | Body is one call forwarding the parameters unchanged. |
+| `check = "pass-through-wrapper"` | Free function whose body is one call forwarding the parameters unchanged. Methods (they may satisfy an interface) and callbacks (they pin arity) are skipped. |
 | `check = "redundant-null-check"` | Null test right after a non-null assignment (TS, TSX, JS, Python, Go). Fixable. |
-| `check = "duplicate-function"` + `min_similarity` | Repo-wide Jaccard similarity of identifier-blind AST shingles. |
+| `check = "duplicate-function"` + `min_similarity` | Repo-wide Jaccard similarity of function-body AST shingles. Identifier names are ignored, literal values are not. |
 | `check = "ghost-abstraction"` | Interface / abstract class / trait with one implementor and at most one other use (TS, TSX, Python, Rust). |
 
 ```toml

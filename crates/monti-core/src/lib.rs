@@ -96,7 +96,7 @@ fn scan_tree(lang: Language, root: Node, src: &str, rules: &[Rule]) -> Vec<Findi
             }
             Check::MaxCommentCodeRatio(max) => metrics::functions(lang, root)
                 .into_iter()
-                .filter(|f| metrics::comment_code_ratio(*f) > *max)
+                .filter(|f| metrics::comment_code_ratio(*f, src) > *max)
                 .map(|node| Hit { node, fix: None })
                 .collect(),
             Check::PassThroughWrapper => detect::pass_through_wrappers(lang, root, src),
@@ -139,7 +139,7 @@ pub fn scan_path(root: &Path, rules: &[Rule]) -> Result<Vec<FileReport>> {
         index.add(&path, lang, root_node, &src);
         reports.push(FileReport {
             findings: scan_tree(lang, root_node, &src, rules),
-            metrics: metrics::measure(root_node),
+            metrics: metrics::measure(root_node, &src),
             path,
             language: lang,
         });

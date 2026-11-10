@@ -28,7 +28,7 @@ fn typescript_slop_is_flagged() {
             ("pass-through-wrapper", 21),
             ("redundant-null-check", 27),
             ("restating-comment", 36),
-            ("swallowed-catch", 44),
+            ("commented-catch", 44),
         ])
     );
 }
@@ -38,13 +38,13 @@ fn python_slop_is_flagged() {
     assert_eq!(
         hits(Language::Python, include_str!("fixtures/slop.py")),
         owned(&[
-            ("swallowed-except", 5),
+            ("swallowed-except", 4),
             ("comment-flood", 8),
             ("pass-through-wrapper", 14),
             ("redundant-null-check", 20),
             ("comment-flood", 26),
             ("restating-comment", 27),
-            ("swallowed-except", 36),
+            ("commented-except", 34),
         ])
     );
 }
@@ -57,7 +57,7 @@ fn rust_slop_is_flagged() {
             ("swallowed-err-arm", 4),
             ("pass-through-wrapper", 8),
             ("restating-comment", 13),
-            ("swallowed-err-arm", 20),
+            ("commented-err-arm", 20),
         ])
     );
 }
@@ -71,7 +71,7 @@ fn go_slop_is_flagged() {
             ("pass-through-wrapper", 9),
             ("redundant-null-check", 15),
             ("restating-comment", 22),
-            ("swallowed-err-check", 29),
+            ("commented-err-check", 29),
         ])
     );
 }
@@ -85,8 +85,21 @@ fn tsx_and_javascript_are_scanned() {
     assert_eq!(hits(Language::Tsx, include_str!("fixtures/slop.tsx")), owned(&[("swallowed-catch", 4)]));
     assert_eq!(
         hits(Language::JavaScript, include_str!("fixtures/slop.js")),
-        owned(&[("swallowed-catch", 4), ("pass-through-wrapper", 9)])
+        owned(&[("commented-catch", 4), ("pass-through-wrapper", 9)])
     );
+}
+
+#[test]
+fn empty_catches_are_errors_commented_ones_warnings() {
+    let rules = parse_rules(DEFAULT_RULES).unwrap();
+    let ids = |lang, src: &str| -> Vec<String> { scan(lang, src, &rules).unwrap().into_iter().map(|f| f.rule_id).collect() };
+    let py = |body: &str| format!("try:\n    go()\nexcept E:\n{body}\n");
+    assert_eq!(ids(Language::Python, &py("    pass")), ["swallowed-except"]);
+    assert_eq!(ids(Language::Python, &py("    # deliberate\n    pass")), ["commented-except"]);
+    assert_eq!(ids(Language::Python, &py("    pass  # deliberate")), ["commented-except"]);
+    assert_eq!(ids(Language::TypeScript, "try { go(); } catch { }"), ["swallowed-catch"]);
+    assert_eq!(ids(Language::TypeScript, "try { go(); } catch { /* private window */ }"), ["commented-catch"]);
+    assert_eq!(ids(Language::TypeScript, "try { go(); } catch { /* a */ log(); /* b */ }"), Vec::<String>::new());
 }
 
 #[test]
@@ -137,6 +150,12 @@ fn repo_scan_finds_duplicates_and_ghosts() {
     .unwrap();
     fs::write(dir.join("ghost.py"), "from abc import ABC\n\nclass Store(ABC):\n    pass\n\nclass DiskStore(Store):\n    pass\n").unwrap();
     fs::write(dir.join("ghost.rs"), "trait Clock { fn now(&self) -> u64; }\nstruct Sys;\nimpl Clock for Sys { fn now(&self) -> u64 { 0 } }\n").unwrap();
+    // Same body shape, different data: not a copy. Same signature, stub body: not a copy.
+    fs::write(
+        dir.join("not_copies.py"),
+        "def test_interpolates():\n    assert sim_time(5, [(0, 100.0), (10, 200.0)]) == 150.0\n\n\ndef test_holds():\n    assert sim_time(20, [(0, 100.0), (10, 200.0)]) == 200.0\n\n\nclass Api(Protocol):\n    def messages(self, endpoint: str) -> list[dict[str, Any]]: ...\n    def patients(self, endpoint: str) -> list[dict[str, Any]]: ...\n",
+    )
+    .unwrap();
     fs::write(dir.join(".montiignore"), "ignored/\n").unwrap();
     fs::create_dir(dir.join("ignored")).unwrap();
     fs::write(dir.join("ignored/x.py"), "def (:\n").unwrap();
@@ -165,10 +184,11 @@ fn repo_scan_finds_duplicates_and_ghosts() {
 
 #[test]
 fn file_metrics() {
-    let src = "def f(x):\n    # why\n    return x  # trailing\n";
+    let src = "def f(x):\n    # why\n    return x  # trailing\n    # type: ignore\n";
     let tree = ast::parse(Language::Python, src).unwrap();
-    let m = metrics::measure(tree.root_node());
-    assert_eq!((m.code_lines, m.comment_lines, m.comment_count), (2, 2, 2));
+    let m = metrics::measure(tree.root_node(), src);
+    // own-line "# why" only: trailing comments annotate code, directives are for tools
+    assert_eq!((m.code_lines, m.comment_lines, m.comment_count), (2, 1, 2));
     assert!(m.max_depth >= 3, "depth {}", m.max_depth);
 }
 

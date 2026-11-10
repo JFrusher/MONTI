@@ -1,7 +1,7 @@
 //! Per-file detectors a Tree-sitter query cannot express.
 
 use crate::Edit;
-use crate::ast::{Language, descendants, is_comment, last_row};
+use crate::ast::{Language, descendants, is_comment, is_directive, last_row};
 use crate::metrics::functions;
 use std::collections::HashSet;
 use tree_sitter::Node;
@@ -23,13 +23,34 @@ fn named(n: Node) -> Vec<Node> {
 
 // ---- pass-through wrappers -------------------------------------------------
 
-/// Functions whose whole body is one call forwarding exactly their parameters, in order.
+/// Free functions whose whole body is one call forwarding exactly their parameters, in order.
 pub fn pass_through_wrappers<'t>(lang: Language, root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
     functions(lang, root)
         .into_iter()
-        .filter(|f| is_pass_through(lang, *f, src))
+        .filter(|f| !is_method(*f) && !is_callback(*f) && is_pass_through(lang, *f, src))
         .map(|node| Hit { node, fix: None })
         .collect()
+}
+
+/// Methods may delegate to satisfy an interface or act as a facade.
+fn is_method(f: Node) -> bool {
+    if matches!(f.kind(), "method_definition" | "method_declaration") {
+        return true;
+    }
+    let mut parent = f.parent();
+    if parent.is_some_and(|p| p.kind() == "decorated_definition") {
+        parent = parent.and_then(|p| p.parent());
+    }
+    parent
+        .filter(|p| matches!(p.kind(), "block" | "declaration_list"))
+        .and_then(|p| p.parent())
+        .is_some_and(|c| matches!(c.kind(), "class_definition" | "impl_item" | "trait_item"))
+}
+
+/// A callback also pins the arity: `Array.from(xs, b => f(b))` is not `Array.from(xs, f)`,
+/// because `Array.from` passes the index too.
+fn is_callback(f: Node) -> bool {
+    f.parent().is_some_and(|p| matches!(p.kind(), "arguments" | "argument_list"))
 }
 
 fn is_pass_through(lang: Language, func: Node, src: &str) -> bool {
@@ -197,11 +218,8 @@ fn unwrap_if(if_node: Node, src: &str) -> Option<Edit> {
 
 // ---- restating comments ----------------------------------------------------
 
-// shortcut: fixed list of tool directives that look like prose; extend when one gets deleted wrongly.
-const KEEP_MARKERS: &[&str] = &[
-    "TODO", "FIXME", "HACK", "SAFETY", "NOTE", "///", "//!", "/**", "#!", "go:", "+build", "eslint", "@ts-",
-    "prettier-", "noqa", "type:", "pylint", "pragma", "nolint", "clippy", "istanbul",
-];
+/// Notes and doc comments are never "restating", whatever their words.
+const KEEP_MARKERS: &[&str] = &["TODO", "FIXME", "HACK", "SAFETY", "NOTE", "///", "//!", "/**"];
 
 /// An own-line comment block whose words cover every identifier of the statement right below it,
 /// e.g. `// Set age to 20` above `this.age = 20`. Fix: delete the comment lines.
@@ -224,7 +242,7 @@ pub fn restating_comments<'t>(root: Node<'t>, src: &str) -> Vec<Hit<'t>> {
             first = p;
         }
         let comment = &src[first.start_byte()..last.end_byte()];
-        if KEEP_MARKERS.iter().any(|m| comment.contains(m)) || !restates(comment, target, src) {
+        if is_directive(comment) || KEEP_MARKERS.iter().any(|m| comment.contains(m)) || !restates(comment, target, src) {
             continue;
         }
         hits.push(Hit { node: first, fix: Some(delete_lines(first, last, src)) });

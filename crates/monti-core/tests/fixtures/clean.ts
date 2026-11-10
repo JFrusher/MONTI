@@ -20,3 +20,6 @@ export function warn(): void {
     /* keep going */ report(e); /* logged */
   }
 }
+
+export const codes = (xs: number[]): string =>
+  Array.from(xs, (b) => String.fromCharCode(b)).join("");

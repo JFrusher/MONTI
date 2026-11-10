@@ -1,4 +1,4 @@
-use crate::ast::{Language, descendants, is_comment};
+use crate::ast::{Language, descendants, is_comment, is_directive, last_row};
 use std::collections::BTreeSet;
 use tree_sitter::Node;
 
@@ -6,14 +6,15 @@ use tree_sitter::Node;
 pub struct Metrics {
     /// Lines holding at least one non-comment token.
     pub code_lines: usize,
-    /// Lines holding at least one comment. A line with code and a trailing comment counts in both.
+    /// Lines holding only comments. Trailing comments annotate code, so they do not count.
     pub comment_lines: usize,
+    /// Comments, tool directives (`# type: ignore`) excluded.
     pub comment_count: usize,
     /// Depth of the deepest node below `node` (a leaf has depth 0).
     pub max_depth: usize,
 }
 
-pub fn measure(node: Node) -> Metrics {
+pub fn measure(node: Node, src: &str) -> Metrics {
     let mut code = BTreeSet::new();
     let mut comments = BTreeSet::new();
     let mut comment_count = 0;
@@ -24,8 +25,10 @@ pub fn measure(node: Node) -> Metrics {
         max_depth = max_depth.max(depth);
         let rows = n.start_position().row..=n.end_position().row;
         if is_comment(n.kind()) {
-            comment_count += 1;
-            comments.extend(n.start_position().row..=crate::ast::last_row(n));
+            if !is_directive(&src[n.byte_range()]) {
+                comment_count += 1;
+                comments.extend(n.start_position().row..=last_row(n));
+            }
         } else if n.child_count() == 0 {
             code.extend(rows);
         } else {
@@ -36,14 +39,14 @@ pub fn measure(node: Node) -> Metrics {
 
     Metrics {
         code_lines: code.len(),
-        comment_lines: comments.len(),
+        comment_lines: comments.difference(&code).count(),
         comment_count,
         max_depth,
     }
 }
 
-pub fn comment_code_ratio(node: Node) -> f64 {
-    let m = measure(node);
+pub fn comment_code_ratio(node: Node, src: &str) -> f64 {
+    let m = measure(node, src);
     m.comment_lines as f64 / m.code_lines as f64
 }
 

@@ -10,3 +10,16 @@ def total(items):
     subtotal = sum(items)
     tax = subtotal * 0.2
     return subtotal + tax
+
+
+class Api(Protocol):
+    def sign_in(self, pin: str) -> None: ...  # SignInError, LockedOut
+
+
+class RealHardware:
+    def random_bytes(self, n: int) -> bytes:
+        return secrets.token_bytes(n)
+
+
+def defaults(**overrides):
+    return {**BASE, **overrides}  # type: ignore[arg-type]

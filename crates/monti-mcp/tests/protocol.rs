@@ -44,7 +44,7 @@ fn audit_and_duplicate_tools_over_stdio() {
 
     let audit = tool_json(&responses[2]);
     assert_eq!(audit["findings"][0]["rule_id"], "swallowed-except");
-    assert_eq!(audit["findings"][0]["line"], 4);
+    assert_eq!(audit["findings"][0]["line"], 3);
 
     let dup = tool_json(&responses[3]);
     assert_eq!(dup["matches"][0]["existing"], "clamp");

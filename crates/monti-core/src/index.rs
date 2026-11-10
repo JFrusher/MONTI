@@ -1,16 +1,17 @@
 //! Repo-wide symbol index: structural duplicates and ghost abstractions.
 
-use crate::ast::{self, Language, descendants};
+use crate::ast::{self, Language, descendants, is_comment};
 use crate::metrics::functions;
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use tree_sitter::Node;
 
-/// Functions smaller than this many AST nodes all look alike; they are not compared.
-const MIN_NODES: usize = 30;
+/// Bodies smaller than this many AST nodes all look alike; they are not compared.
+const MIN_NODES: usize = 20;
 
 pub struct FnEntry {
     pub path: PathBuf,
@@ -58,7 +59,7 @@ impl Index {
 
     pub fn add(&mut self, path: &Path, lang: Language, root: Node, src: &str) {
         for f in functions(lang, root) {
-            let (shingles, size) = shingles(f);
+            let (shingles, size) = shingles(f, src);
             let p = f.start_position();
             self.functions.push(FnEntry {
                 path: path.to_path_buf(),
@@ -92,12 +93,17 @@ impl Index {
     }
 
     /// Pairs of distinct, non-nested functions in the same language at or above `min` similarity.
-    // shortcut: all-pairs O(n^2); switch to MinHash/LSH buckets if large repos get slow.
+    // shortcut: pairs are pruned by size only; switch to MinHash/LSH if repos with huge function counts get slow.
     pub fn duplicates(&self, min: f64) -> Vec<(&FnEntry, &FnEntry, f64)> {
-        let big: Vec<&FnEntry> = self.functions.iter().filter(|f| f.size >= MIN_NODES).collect();
+        let mut big: Vec<&FnEntry> = self.functions.iter().filter(|f| f.size >= MIN_NODES).collect();
+        big.sort_by_key(|f| f.shingles.len());
         let mut out = Vec::new();
         for (i, a) in big.iter().enumerate() {
             for b in &big[i + 1..] {
+                // Jaccard <= |a| / |b|, and |b| only grows from here.
+                if (a.shingles.len() as f64) < min * b.shingles.len() as f64 {
+                    break;
+                }
                 let nested = a.path == b.path && a.range.start < b.range.end && b.range.start < a.range.end;
                 if a.language != b.language || nested {
                     continue;
@@ -116,7 +122,7 @@ impl Index {
         let mut out = Vec::new();
         for f in functions(lang, root) {
             let proposed = fn_name(f, src);
-            let (sh, size) = shingles(f);
+            let (sh, size) = shingles(f, src);
             for e in self.functions.iter().filter(|e| e.language == lang) {
                 let similarity = jaccard(&sh, &e.shingles);
                 let structural = size >= MIN_NODES && e.size >= MIN_NODES && similarity >= min;
@@ -141,12 +147,30 @@ fn fn_name(f: Node, src: &str) -> String {
     f.child_by_field_name("name").map_or("<anonymous>".into(), |n| src[n.byte_range()].to_string())
 }
 
-/// 3-grams of the pre-order node-kind sequence. Kinds ignore identifier names and literal values,
-/// so renamed copies hash the same. Returns the shingles and the node count.
-fn shingles(f: Node) -> (HashSet<u64>, usize) {
-    let kinds: Vec<u64> = descendants(f).iter().map(|n| n.kind_id() as u64).collect();
-    let set = kinds.windows(3).map(|w| w[0] << 32 | w[1] << 16 | w[2]).collect();
-    (set, kinds.len())
+/// 3-grams of the function body's pre-order token sequence, plus the token count.
+/// Only the body: matching signatures (interface stubs) are not duplicated logic.
+fn shingles(f: Node, src: &str) -> (HashSet<u64>, usize) {
+    let body = f.child_by_field_name("body").unwrap_or(f);
+    let tokens: Vec<u64> =
+        descendants(body).into_iter().filter(|n| !is_comment(n.kind())).map(|n| token(n, src)).collect();
+    let set = tokens.windows(3).map(hash).collect();
+    (set, tokens.len())
+}
+
+/// Identifiers reduce to their kind, so renamed copies match. Literal values stay,
+/// so code differing only in its data (table-like tests) does not.
+fn token(n: Node, src: &str) -> u64 {
+    if n.is_named() && n.child_count() == 0 && !n.kind().ends_with("identifier") {
+        hash((n.kind_id(), &src[n.byte_range()]))
+    } else {
+        n.kind_id() as u64
+    }
+}
+
+fn hash(value: impl Hash) -> u64 {
+    let mut h = DefaultHasher::new();
+    value.hash(&mut h);
+    h.finish()
 }
 
 fn jaccard(a: &HashSet<u64>, b: &HashSet<u64>) -> f64 {

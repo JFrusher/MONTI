@@ -5,12 +5,23 @@
 
 [rules.swallowed-catch]
 severity = "error"
-message = "Catch block is empty or only comments. Swallowing exceptions without handling is AI defensive slop."
+message = "Empty catch block. Swallowing exceptions without handling is AI defensive slop."
 languages = ["typescript", "tsx", "javascript"]
 tree_sitter_query = '''
 (catch_clause
   body: (statement_block) @block
-  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$"))
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+
+[rules.commented-catch]
+severity = "warning"
+message = "Catch block holds only comments. Check the swallow is deliberate."
+languages = ["typescript", "tsx", "javascript"]
+tree_sitter_query = '''
+(catch_clause
+  body: (statement_block) @block
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
 '''
 
 [rules.swallowed-except]
@@ -18,8 +29,19 @@ severity = "error"
 message = "`except` body is a bare `pass`. Swallowing exceptions without handling is AI defensive slop."
 languages = ["python"]
 tree_sitter_query = '''
-(except_clause
-  (block . (pass_statement) .) @block)
+((except_clause
+  (block . (pass_statement) .) @block) @clause
+  (#not-match? @clause "#"))
+'''
+
+[rules.commented-except]
+severity = "warning"
+message = "`except` only passes with a comment. Check the swallow is deliberate."
+languages = ["python"]
+tree_sitter_query = '''
+((except_clause (block) @block) @clause
+  (#match? @block "^(\\s|#[^\\n]*)*pass(\\s|#[^\\n]*)*$")
+  (#match? @clause "#"))
 '''
 
 [rules.swallowed-err-arm]
@@ -31,7 +53,20 @@ tree_sitter_query = '''
   pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
   value: (block) @block
   (#eq? @variant "Err")
-  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$"))
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+
+[rules.commented-err-arm]
+severity = "warning"
+message = "`Err(_)` arm holds only comments. Check the discard is deliberate."
+languages = ["rust"]
+tree_sitter_query = '''
+(match_arm
+  pattern: (match_pattern (tuple_struct_pattern type: (identifier) @variant))
+  value: (block) @block
+  (#eq? @variant "Err")
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
 '''
 
 [rules.swallowed-err-check]
@@ -43,7 +78,20 @@ tree_sitter_query = '''
   condition: (binary_expression left: (identifier) @err right: (nil))
   consequence: (block) @block
   (#eq? @err "err")
-  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$"))
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+
+[rules.commented-err-check]
+severity = "warning"
+message = "`if err != nil` holds only comments. Check the discard is deliberate."
+languages = ["go"]
+tree_sitter_query = '''
+(if_statement
+  condition: (binary_expression left: (identifier) @err right: (nil))
+  consequence: (block) @block
+  (#eq? @err "err")
+  (#match? @block "^\\{(\\s|//[^\\n]*|/\\*([^*]|\\*+[^*/])*\\*+/)*\\}$")
+  (#not-match? @block "^\\{\\s*\\}$"))
 '''
 
 [rules.comment-flood]

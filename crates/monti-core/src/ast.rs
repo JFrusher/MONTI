@@ -55,6 +55,17 @@ impl Language {
     }
 }
 
+// shortcut: fixed list of tool directives; extend when one is treated as prose.
+const DIRECTIVES: &[&str] = &[
+    "#!", "go:", "+build", "eslint", "@ts-", "prettier-", "noqa", "type:", "pylint", "pragma", "nolint", "clippy",
+    "istanbul",
+];
+
+/// Comments addressed to tools (`# type: ignore`, `// eslint-disable`), not to readers.
+pub fn is_directive(comment: &str) -> bool {
+    DIRECTIVES.iter().any(|d| comment.contains(d))
+}
+
 pub fn is_comment(kind: &str) -> bool {
     matches!(kind, "comment" | "line_comment" | "block_comment")
 }
