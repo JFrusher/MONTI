@@ -1,0 +1,24 @@
+[rules.swallowed-catch]
+severity = "error"
+message = "Empty catch block. Swallowing exceptions without handling is AI defensive slop."
+languages = ["typescript"]
+tree_sitter_query = '''
+(catch_clause
+  body: (statement_block) @block
+  (#match? @block "^\\{\\s*\\}$"))
+'''
+
+[rules.swallowed-except]
+severity = "error"
+message = "`except` body is a bare `pass`. Swallowing exceptions without handling is AI defensive slop."
+languages = ["python"]
+tree_sitter_query = '''
+(except_clause
+  (block . (pass_statement) .) @block)
+'''
+
+[rules.comment-flood]
+severity = "warning"
+message = "Comment-to-code ratio too high; comments likely restate the code."
+languages = ["typescript", "python"]
+max_comment_code_ratio = 0.35
